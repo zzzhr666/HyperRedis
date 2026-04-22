@@ -1,0 +1,24 @@
+# Build directories
+/build/
+/cmake-build-*/
+/out/
+
+# CMake generated files
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+/compile_commands.json
+/CTestTestfile.cmake
+/Testing/
+
+# IDE and local tooling
+/.idea/
+/.codex
+
+# Editor and OS temporary files
+*.swp
+*.swo
+*.tmp
+.DS_Store
+Thumbs.db
