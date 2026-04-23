@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
+using namespace hyper;
 template<typename T>
 std::vector<T> snapshot(const list<T>& values) {
     std::vector<T> result;
