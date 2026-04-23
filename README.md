@@ -95,8 +95,28 @@ src/
 
 ## 当前状态
 
-目前仓库处于工程初始化阶段，已经先把文档、命名和构建结构约定下来，后续实现时只需要在 `CMakeLists.txt` 中补充对应的 `.cpp` 文件列表即可。
+仓库已经不再只是工程初始化状态，当前已经进入核心数据结构的第一阶段实现。
 
-在还没有接入任何核心 `.cpp` 文件之前，`HyperRedisCore` 会先以一个占位目标的形式出现在 CMake 中；等核心源码加入后，再自然切换为真正的静态库目标。
+目前已完成的内容包括：
+
+- `linked_list`：完成基础双向链表实现，并接入 GoogleTest
+- `dict`：完成基础版哈希字典实现，并保留 Redis 风格的双表与渐进式 rehash 思路
+- 测试基础设施：已接入 `GTest`，当前为 `linked_list` 和 `dict` 提供测试可执行文件
+
+当前 `dict` 已具备的能力包括：
+
+- 链地址法冲突处理
+- `insert` / `insertOrAssign` / `erase` / `contains` / `get`
+- 自动扩容与自动缩容
+- 渐进式 rehash
+- 基于 `forEach` 的遍历接口
+
+目前 `HyperRedisCore` 仍然以头文件为主，因此 CMake 中核心库目标仍可以保持轻量；随着后续 `redisObject`、`redisDb` 和持久化相关 `.cpp` 文件加入，再逐步演进为更完整的核心库实现。
+
+接下来的重点将从底层数据结构转向：
+
+- `redisObject`
+- `redisDb`
+- 简化版持久化流程（如 RDB save/load）
 
 在字符串实现上，本项目当前不会以 1:1 复刻 Redis SDS 为阶段目标，而是优先复用标准库字符串抽象；但在 `dict`、`skiplist`、`redisObject`、`redisDb` 等真正承载 Redis 核心设计的部分，仍然会优先保留书中的结构和思路。

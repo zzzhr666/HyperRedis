@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 3.20)
 
 project(HyperRedis LANGUAGES CXX)
 
@@ -60,5 +60,17 @@ target_link_libraries(linked_list_test
         spdlog::spdlog
 )
 
+add_executable(dict_test
+    test/dict_test.cpp
+)
+
+target_link_libraries(dict_test
+    PRIVATE
+        GTest::gtest
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
+gtest_discover_tests(dict_test)
