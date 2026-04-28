@@ -71,6 +71,18 @@ target_link_libraries(dict_test
         spdlog::spdlog
 )
 
+add_executable(skip_list_test
+    test/skip_list_test.cpp
+)
+
+target_link_libraries(skip_list_test
+    PRIVATE
+        GTest::gtest
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
 gtest_discover_tests(dict_test)
+gtest_discover_tests(skip_list_test)
