@@ -27,8 +27,13 @@ Use modern C++ with C++20 as the default build standard. Keep code compatible wi
 - Headers: `.hpp`
 - Sources: `.cpp`
 - File and directory names: `snake_case`
-- Type names: `PascalCase`
 - Keep indentation consistent at 4 spaces
+- Type names should stay close to Redis/book concepts already used in the codebase, e.g. `dict`, `skipList`, `intset`
+- Public APIs use `lowerCamelCase` without a trailing underscore, e.g. `insertOrAssign`, `forEach`, `byteSize`
+- Private helper methods use `lowerCamelCase_` with a trailing underscore, e.g. `rehashStep_`, `needRehash_`
+- Private ordinary data members use `lower_snake_case_` with a trailing underscore, e.g. `hash_tables_`, `rehash_index_`
+- Struct data fields do not use trailing underscores, e.g. `entry.key`, `ht.used`
+- `static constexpr` compile-time constants use `PascalCase`, e.g. `ExpandFactor`, `MinBucketSize`
 
 Prefer small, focused headers and keep dependencies local to each module.
 
@@ -38,10 +43,10 @@ No test framework is wired in yet. When tests are introduced, place them under `
 
 ## Commit & Pull Request Guidelines
 
-Use short, imperative commit messages with a type prefix such as `feature`, `fix`, or `chore`. Examples:
+Use short, imperative commit messages with a bracketed type prefix such as `[feature]`, `[fix]`, or `[chore]`. Examples:
 
-- `feature: add skip list skeleton`
-- `fix: correct object lifetime handling`
-- `chore: update CMake source lists`
+- `[feature] add skip list skeleton`
+- `[fix] correct object lifetime handling`
+- `[chore] update CMake source lists`
 
 Pull requests should describe the behavior change, list touched modules, mention any `CMakeLists.txt` source-list updates, and include build or test evidence when available.

@@ -14,10 +14,10 @@ namespace hyper {
     public:
         explicit dict(std::size_t size = 4)
             : rehash_index_(-1) {
-            resetTable_(hts_[0], normalizeBucketCount_(size));
-            hts_[1].table.clear();
-            hts_[1].used = 0;
-            hts_[1].mask = 0;
+            resetTable_(hash_tables_[0], normalizeBucketCount_(size));
+            hash_tables_[1].table.clear();
+            hash_tables_[1].used = 0;
+            hash_tables_[1].mask = 0;
         }
 
 
@@ -34,7 +34,7 @@ namespace hyper {
         dict& operator=(dict&&) = delete;
 
         [[nodiscard]] std::size_t size() const noexcept {
-            return hts_[0].used + hts_[1].used;
+            return hash_tables_[0].used + hash_tables_[1].used;
         }
 
         [[nodiscard]] bool empty() const noexcept {
@@ -42,7 +42,7 @@ namespace hyper {
         }
 
         void clear() {
-            for (auto& ht: hts_) {
+            for (auto& ht: hash_tables_) {
                 for (auto& entry: ht.table) {
                     auto current = entry;
                     while (current) {
@@ -55,18 +55,18 @@ namespace hyper {
                 ht.used = 0;
             }
 
-            hts_[1].table.clear();
-            hts_[1].mask = 0;
+            hash_tables_[1].table.clear();
+            hash_tables_[1].mask = 0;
             rehash_index_ = -1;
         }
 
 
         //不覆盖，若存在返回false
         bool insert(K k, V v) {
-            if (is_rehashing_()) {
+            if (isRehashing_()) {
                 rehashStep_();
             } else if (needRehash_()) {
-                startRehash_(hts_[0].table.size() * 2);
+                startRehash_(hash_tables_[0].table.size() * 2);
             }
             if (find_(k)) {
                 return false;
@@ -76,29 +76,29 @@ namespace hyper {
         }
 
         bool erase(const K& k) {
-            if (is_rehashing_()) {
+            if (isRehashing_()) {
                 rehashStep_();
             }
 
-            int ht_num = is_rehashing_() ? 2 : 1;
+            int ht_num = isRehashing_() ? 2 : 1;
             for (int i = 0; i < ht_num; ++i) {
-                if (hts_[i].table.empty()) {
+                if (hash_tables_[i].table.empty()) {
                     continue;
                 }
-                std::size_t bucket_index = getBucketIndex_(hts_[i], k);
-                dictEntry* current = hts_[i].table[bucket_index];
+                std::size_t bucket_index = getBucketIndex_(hash_tables_[i], k);
+                dictEntry* current = hash_tables_[i].table[bucket_index];
                 dictEntry* prev = nullptr;
                 while (current) {
                     if (key_equal_(current->key, k)) {
                         if (prev == nullptr) {
-                            hts_[i].table[bucket_index] = current->next;
+                            hash_tables_[i].table[bucket_index] = current->next;
                         } else {
                             prev->next = current->next;
                         }
 
                         delete current;
-                        --hts_[i].used;
-                        if (!is_rehashing_() && needShrink_()) {
+                        --hash_tables_[i].used;
+                        if (!isRehashing_() && needShrink_()) {
                             startRehash_(getShrinkTarget_());
                             rehashStep_();
                         }
@@ -133,10 +133,10 @@ namespace hyper {
 
         //修改-> false 插入-> true
         bool insertOrAssign(K k, V v) {
-            if (is_rehashing_()) {
+            if (isRehashing_()) {
                 rehashStep_();
             } else if (needRehash_()) {
-                startRehash_(hts_[0].table.size() * 2);
+                startRehash_(hash_tables_[0].table.size() * 2);
             }
 
             if (dictEntry* it = find_(k)) {
@@ -150,18 +150,18 @@ namespace hyper {
         template<typename FUNCTION>
             requires std::invocable<FUNCTION,const K&,const V&>
         void forEach(FUNCTION&& f) const {
-            forEachInTable_(hts_[0],std::forward<FUNCTION>(f));
-            if (is_rehashing_()) {
-                forEachInTable_(hts_[1],std::forward<FUNCTION>(f));
+            forEachInTable_(hash_tables_[0],std::forward<FUNCTION>(f));
+            if (isRehashing_()) {
+                forEachInTable_(hash_tables_[1],std::forward<FUNCTION>(f));
             }
         }
 
         template<typename FUNCTION>
             requires std::invocable<FUNCTION,const K&,V&>
         void forEach(FUNCTION&& f) {
-            forEachInTable_(hts_[0],std::forward<FUNCTION>(f));
-            if (is_rehashing_()) {
-                forEachInTable_(hts_[1],std::forward<FUNCTION>(f));
+            forEachInTable_(hash_tables_[0],std::forward<FUNCTION>(f));
+            if (isRehashing_()) {
+                forEachInTable_(hash_tables_[1],std::forward<FUNCTION>(f));
             }
         }
 
@@ -180,7 +180,7 @@ namespace hyper {
         };
 
         void insertAtHead_(K k, V v) {
-            dictHt& current_ht = is_rehashing_() ? hts_[1] : hts_[0];
+            dictHt& current_ht = isRehashing_() ? hash_tables_[1] : hash_tables_[0];
             std::size_t bucket_index = getBucketIndex_(current_ht, k);
             dictEntry* head = current_ht.table[bucket_index];
             auto new_entry = new dictEntry{std::move(k), std::move(v), head};
@@ -189,21 +189,21 @@ namespace hyper {
         }
 
         dictEntry* find_(const K& k) {
-            if (auto res = findInTable_(hts_[0], k)) {
+            if (auto res = findInTable_(hash_tables_[0], k)) {
                 return res;
             }
-            if (is_rehashing_()) {
-                return findInTable_(hts_[1], k);
+            if (isRehashing_()) {
+                return findInTable_(hash_tables_[1], k);
             }
             return nullptr;
         }
 
         const dictEntry* find_(const K& k) const {
-            if (auto res = findInTable_(hts_[0], k)) {
+            if (auto res = findInTable_(hash_tables_[0], k)) {
                 return res;
             }
-            if (is_rehashing_()) {
-                return findInTable_(hts_[1], k);
+            if (isRehashing_()) {
+                return findInTable_(hash_tables_[1], k);
             }
             return nullptr;
         }
@@ -241,7 +241,7 @@ namespace hyper {
         }
 
 
-        [[nodiscard]] bool is_rehashing_() const noexcept {
+        [[nodiscard]] bool isRehashing_() const noexcept {
             return rehash_index_ != -1;
         }
 
@@ -269,11 +269,11 @@ namespace hyper {
         }
 
         void rehashStep_() {
-            if (!is_rehashing_()) {
+            if (!isRehashing_()) {
                 return;
             }
-            auto& old_ht = hts_[0];
-            auto& new_ht = hts_[1];
+            auto& old_ht = hash_tables_[0];
+            auto& new_ht = hash_tables_[1];
             while (rehash_index_ < old_ht.table.size() && old_ht.table[rehash_index_] == nullptr) {
                 ++rehash_index_;
             }
@@ -291,7 +291,7 @@ namespace hyper {
                 auto new_index = getBucketIndex_(new_ht, to_do->key);
                 dictEntry* new_pos = new_ht.table[new_index];
                 to_do->next = new_pos;
-                hts_[1].table[new_index] = to_do;
+                hash_tables_[1].table[new_index] = to_do;
                 to_do = next;
                 ++new_ht.used;
                 --old_ht.used;
@@ -310,24 +310,24 @@ namespace hyper {
 
 
         void startRehash_(std::size_t size) {
-            assert(!is_rehashing_());
+            assert(!isRehashing_());
             auto bucket_count = normalizeBucketCount_(size);
-            resetTable_(hts_[1], bucket_count);
+            resetTable_(hash_tables_[1], bucket_count);
             rehash_index_ = 0;
         }
 
         [[nodiscard]] bool needRehash_() const noexcept {
-            return hts_[0].used / static_cast<double>(hts_[0].table.size()) >= ExpandFactor;
+            return hash_tables_[0].used / static_cast<double>(hash_tables_[0].table.size()) >= ExpandFactor;
         }
 
         [[nodiscard]] bool needShrink_() const noexcept {
-            return !is_rehashing_() &&
-                   hts_[0].table.size() > MinBucketSize &&
-                   hts_[0].used / static_cast<double>(hts_[0].table.size()) <= ShrinkFactor;
+            return !isRehashing_() &&
+                   hash_tables_[0].table.size() > MinBucketSize &&
+                   hash_tables_[0].used / static_cast<double>(hash_tables_[0].table.size()) <= ShrinkFactor;
         }
 
         [[nodiscard]] std::size_t getShrinkTarget_() const noexcept {
-            return normalizeBucketCount_(std::max(static_cast<std::size_t>(4), hts_[0].used * 2));
+            return normalizeBucketCount_(std::max(static_cast<std::size_t>(4), hash_tables_[0].used * 2));
         }
 
         template<typename FUNCTION>
@@ -363,7 +363,7 @@ namespace hyper {
         static constexpr std::size_t MinBucketSize = 4;
         static constexpr double ShrinkFactor = 0.25;
 
-        std::array<dictHt,2> hts_;
+        std::array<dictHt,2> hash_tables_;
         std::ptrdiff_t rehash_index_;
         Hash hash_;
         KeyEqual key_equal_;

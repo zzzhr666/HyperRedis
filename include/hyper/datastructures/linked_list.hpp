@@ -16,14 +16,14 @@ namespace hyper {
     template<typename T>
     class list {
     public:
-        list() : len_(0), head_(nullptr), tail_(nullptr) {}
+        list() : length_(0), head_(nullptr), tail_(nullptr) {}
 
         [[nodiscard]] size_t size() const {
-            return len_;
+            return length_;
         }
 
         [[nodiscard]] bool empty() const {
-            return len_ == 0;
+            return length_ == 0;
         }
 
 
@@ -32,21 +32,21 @@ namespace hyper {
         list& operator=(const list&) = delete;
 
         list(list&& other) noexcept
-            : len_(other.len_), head_(other.head_), tail_(other.tail_) {
+            : length_(other.length_), head_(other.head_), tail_(other.tail_) {
             other.head_ = nullptr;
             other.tail_ = nullptr;
-            other.len_ = 0;
+            other.length_ = 0;
         }
 
         list& operator=(list&& other) noexcept {
             if (this != &other) {
                 clear();
-                len_ = other.len_;
+                length_ = other.length_;
                 head_ = other.head_;
                 tail_ = other.tail_;
                 other.head_ = nullptr;
                 other.tail_ = nullptr;
-                other.len_ = 0;
+                other.length_ = 0;
             }
             return *this;
         }
@@ -68,7 +68,7 @@ namespace hyper {
             return tail_->data;
         }
 
-        void push_front(T data) {
+        void pushFront(T data) {
             auto new_node = new listNode<T>(std::move(data));
             if (empty()) {
                 head_ = tail_ = new_node;
@@ -77,10 +77,10 @@ namespace hyper {
                 head_->prev = new_node;
                 head_ = new_node;
             }
-            ++len_;
+            ++length_;
         }
 
-        void push_back(T data) {
+        void pushBack(T data) {
             auto new_node = new listNode<T>(std::move(data));
             if (empty()) {
                 head_ = tail_ = new_node;
@@ -89,14 +89,14 @@ namespace hyper {
                 tail_->next = new_node;
                 tail_ = new_node;
             }
-            ++len_;
+            ++length_;
         }
 
-        void pop_front() {
+        void popFront() {
             if (empty()) {
                 return;
             }
-            if (len_ == 1) {
+            if (length_ == 1) {
                 delete head_;
                 head_ = tail_ = nullptr;
             } else {
@@ -105,15 +105,15 @@ namespace hyper {
                 delete old_head;
                 head_->prev = nullptr;
             }
-            --len_;
+            --length_;
         }
 
 
-        void pop_back() {
+        void popBack() {
             if (empty()) {
                 return;
             }
-            if (len_ == 1) {
+            if (length_ == 1) {
                 delete tail_;
                 head_ = tail_ = nullptr;
             } else {
@@ -122,7 +122,7 @@ namespace hyper {
                 delete old_tail;
                 tail_->next = nullptr;
             }
-            --len_;
+            --length_;
         }
 
         const listNode<T>* find(const T& data) const {
@@ -156,17 +156,17 @@ namespace hyper {
                 return;
             }
             if (node == head_) {
-                pop_front();
+                popFront();
                 return;
             }
             if (node == tail_) {
-                pop_back();
+                popBack();
                 return;
             }
             node->prev->next = node->next;
             node->next->prev = node->prev;
             delete node;
-            --len_;
+            --length_;
         }
 
         bool erase(const T& data) {
@@ -184,7 +184,7 @@ namespace hyper {
                 head_ = next;
             }
             head_ = tail_ = nullptr;
-            len_ = 0;
+            length_ = 0;
         }
 
         ~list() {
@@ -194,7 +194,7 @@ namespace hyper {
         //helper
         template<typename Pred>
             requires std::invocable<Pred,const T&>
-        void for_each(const Pred& pred) const {
+        void forEach(const Pred& pred) const {
             auto it = head_;
             while (it) {
                 const T& data = it->data;
@@ -205,7 +205,7 @@ namespace hyper {
 
         template<typename Pred>
             requires std::invocable<Pred,T&>
-        void for_each(const Pred& pred) {
+        void forEach(const Pred& pred) {
             auto it = head_;
             while (it) {
                 pred(it->data);
@@ -259,7 +259,7 @@ namespace hyper {
         }
 
     private:
-        size_t len_;
+        size_t length_;
         listNode<T>* head_;
         listNode<T>* tail_;
     };

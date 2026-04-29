@@ -82,7 +82,19 @@ target_link_libraries(skip_list_test
         spdlog::spdlog
 )
 
+add_executable(intset_test
+    test/intset_test.cpp
+)
+
+target_link_libraries(intset_test
+    PRIVATE
+        GTest::gtest
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
 gtest_discover_tests(dict_test)
 gtest_discover_tests(skip_list_test)
+gtest_discover_tests(intset_test)

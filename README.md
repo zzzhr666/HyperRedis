@@ -17,6 +17,18 @@
 - 源文件统一使用 `.cpp`
 - `CMakeLists.txt` 中显式列出源文件，不使用 `GLOB`
 
+### 命名约定
+
+当前代码命名以“能从名字直接看出访问属性”为目标：
+
+- 类型名优先贴近 Redis/书中概念；当前已有 `dict`、`skipList`、`intset` 等命名可继续保持
+- public API 使用 `lowerCamelCase`，不加尾随下划线，例如 `insertOrAssign`、`forEach`、`byteSize`
+- private 方法使用 `lowerCamelCase_`，加尾随下划线，例如 `rehashStep_`、`needRehash_`
+- private 普通成员变量使用 `lower_snake_case_`，加尾随下划线，例如 `hash_tables_`、`rehash_index_`
+- struct 的数据字段不加尾随下划线，例如 `dictEntry::key`、`dictHt::used`
+- `static constexpr` 编译期常量使用 `PascalCase`，例如 `ExpandFactor`、`MinBucketSize`
+- 文件和目录名继续使用 `snake_case`
+
 ## 实现原则
 
 为了尽量贴近《Redis设计与实现》的主线，本项目遵循下面的原则：
@@ -85,13 +97,29 @@ src/
 
 这一选择的目标是先保证日志接口统一、易于维护，并避免过早引入复杂的异步日志语义。
 
+## 提交约定
+
+提交信息使用简短的祈使句，并使用方括号类型前缀：
+
+- `[feature] add intset core`
+- `[fix] correct object lifetime handling`
+- `[chore] update CMake source lists`
+
+常用类型包括：
+
+- `[feature]`：新增功能或新的数据结构能力
+- `[fix]`：修复 bug、边界行为或资源管理问题
+- `[chore]`：构建、文档、格式、依赖等维护性改动
+
 ## 依赖
 
 - C++20 编译器
-- CMake 4.1 及以上
+- CMake 3.20 及以上
 - 系统已安装的 `spdlog`
+- 系统已安装的 `GTest`
 
-当前 CMake 通过 `find_package(spdlog REQUIRED)` 查找系统库，并将 `spdlog::spdlog` 链接到 `HyperRedisCore`。
+当前 CMake 通过 `find_package(spdlog REQUIRED)` 和 `find_package(GTest REQUIRED)` 查找系统库，并将
+`spdlog::spdlog` 链接到 `HyperRedisCore`；各测试目标通过 `GTest::gtest` 接入 GoogleTest。
 
 ## 当前状态
 
@@ -99,9 +127,11 @@ src/
 
 目前已完成的内容包括：
 
-- `linked_list`：完成基础双向链表实现，并接入 GoogleTest
+- `linked_list`：完成基础双向链表实现，支持头尾插入删除、查找、删除、遍历和移动语义
 - `dict`：完成基础版哈希字典实现，并保留 Redis 风格的双表与渐进式 rehash 思路
-- 测试基础设施：已接入 `GTest`，当前为 `linked_list` 和 `dict` 提供测试可执行文件
+- `skipList`：完成基础跳表实现，支持有序插入、删除、排名查询、按分值范围查询与范围删除
+- `intset`：完成简化版整数集合实现，支持有序去重、二分查找、编码升级和紧凑字节存储
+- 测试基础设施：已接入 `GTest`，当前为 `linked_list`、`dict`、`skip_list`、`intset` 提供测试可执行文件
 
 当前 `dict` 已具备的能力包括：
 
@@ -110,6 +140,23 @@ src/
 - 自动扩容与自动缩容
 - 渐进式 rehash
 - 基于 `forEach` 的遍历接口
+
+当前 `skipList` 已具备的能力包括：
+
+- 按 `(score, value)` 排序并拒绝完全重复元素
+- 维护 span 并支持 `getRank` / `getElementByRank`
+- 支持分值范围判断、首尾范围查找
+- 支持按 score 范围删除和按 rank 范围删除
+
+当前 `intset` 已具备的能力包括：
+
+- 使用 `std::vector<std::byte>` 保存连续紧凑整数数组
+- 根据元素范围在 `Int16` / `Int32` / `Int64` 之间升级编码
+- 保持元素有序且不允许重复
+- 支持 `insert` / `erase` / `contains` / `clear` / `forEach`
+- 通过 `byteSize` 观察当前紧凑存储占用
+
+当前测试覆盖 `74` 个 GoogleTest 用例，覆盖基础操作、边界行为、渐进式 rehash、跳表范围操作和 intset 编码升级。
 
 目前 `HyperRedisCore` 仍然以头文件为主，因此 CMake 中核心库目标仍可以保持轻量；随着后续 `redisObject`、`redisDb` 和持久化相关 `.cpp` 文件加入，再逐步演进为更完整的核心库实现。
 

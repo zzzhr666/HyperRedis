@@ -212,7 +212,7 @@ namespace hyper {
         }
 
         bool isInScoreRange(const ScoreRange<Score>& range) const {
-            if (isInvalidRange(range) || empty()) {
+            if (isInvalidRange_(range) || empty()) {
                 return false;
             }
             if (!greaterThanMin_(tail_->score.value(),range)) {
@@ -366,7 +366,7 @@ namespace hyper {
             return greaterThanMin_(score,range) && lessThanMax_(score,range);
         }
 
-        static bool isInvalidRange(const ScoreRange<Score>& range) {
+        static bool isInvalidRange_(const ScoreRange<Score>& range) {
             if (range.min > range.max) {
                 return true;
             }
