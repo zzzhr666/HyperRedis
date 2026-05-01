@@ -156,6 +156,163 @@ src/
 - 支持 `insert` / `erase` / `contains` / `clear` / `forEach`
 - 通过 `byteSize` 观察当前紧凑存储占用
 
+当前 `ziplist` 已具备的能力包括：
+
+- 使用 `std::vector<std::byte>` 保存连续紧凑字节布局
+- 采用 C++ 简化 header：`zltail(4) + zllen(2) + zlend(1)`，总字节数由 `std::vector::size()` 管理
+- 支持字符串 entry 的 6-bit、14-bit、32-bit encoding 读写 helper
+- 当前 `prevlen` 仍为 1 byte 简化版，尚未支持 Redis 的 5 byte prevlen
+- 支持 `pushBack` / `pushFront` / `insert` / `erase` / `popFront` / `popBack`
+- 支持 `forEach` / `at` / `find`
+- 已引入 `ziplistEntryView`，当前只解析字符串，但接口已为后续整数 entry 留出空间
+
+### ziplist 下一步任务：变长 prevlen 与连锁更新
+
+下一次继续实现 `ziplist` 时，优先处理 `prevlen`，不要直接上连锁更新。建议按下面顺序推进。
+
+#### 1. 抽出 prevlen helper
+
+先新增并只使用这三个 helper：
+
+```cpp
+[[nodiscard]] static constexpr std::size_t prevLenSize_(std::size_t len) noexcept;
+void writePrevLen_(std::size_t offset, std::size_t prev_len);
+[[nodiscard]] std::pair<std::size_t, std::size_t> readPrevLen_(std::size_t offset) const;
+```
+
+目标语义：
+
+- `prev_len < 254`：占 1 byte，直接保存长度
+- `prev_len >= 254`：占 5 bytes，第 1 byte 写 `0xFE`，后 4 bytes 写 `std::uint32_t` 长度
+- `readPrevLen_()` 返回 `{prev_len_size, prev_len_value}`
+
+建议常量：
+
+```cpp
+static constexpr std::uint8_t BigPrevLenMarker = 0xFE;
+static constexpr std::size_t SmallPrevLenMax = 253;
+```
+
+#### 2. 改 parseEntry_
+
+当前 `parseEntry_()` 默认 `prevlen` 只有 1 byte。下一步要改成：
+
+```text
+prevlen_offset = offset
+{prev_len_size, prev_len_value} = readPrevLen_(prevlen_offset)
+encoding_offset = offset + prev_len_size
+{encoding_size, content_len} = readStringEncoding_(encoding_offset)
+content_offset = encoding_offset + encoding_size
+total_len = prev_len_size + encoding_size + content_len
+```
+
+`entryView` 中建议新增或替换字段：
+
+- `prev_len_size`
+- `prev_len`
+- `encoding_size`
+- `content_len`
+- `total_len`
+
+这样后续 `insert`、`erase`、`popBack` 不需要重复解析。
+
+#### 3. 改写入 entry 的路径
+
+所有写 entry 的地方都要从固定 1 byte prevlen 改成 helper：
+
+- `pushBack`
+- `pushFront`
+- `insertIntoMid_`
+
+新 entry 长度计算应变成：
+
+```text
+entry_len = prevLenSize_(prev_len) + stringEncodingSize_(data.size()) + data.size()
+```
+
+当前阶段可以先限制：
+
+```cpp
+assert(entry_len <= std::numeric_limits<std::uint32_t>::max());
+```
+
+但要注意：只有完成后继节点 prevlen 更新后，才真正允许大 entry 混入多个节点列表。
+
+#### 4. 抽后继 prevlen 更新函数
+
+先不要写完整 cascade，先写一个只更新直接后继的 helper：
+
+```cpp
+void updateNextPrevLen_(std::size_t next_offset, std::size_t new_prev_len);
+```
+
+它负责：
+
+- 如果 `next_offset` 指向 `EndMarker`，什么也不做
+- 比较旧 prevlen 编码大小和新 prevlen 编码大小
+- 编码大小相同：原地覆盖
+- 编码大小不同：先调整 buffer 空间，再写入新 prevlen
+
+这一步完成后，再接入：
+
+- `pushFront` 插入后更新旧 first
+- `insertIntoMid_` 插入后更新原 index 节点
+- `eraseFromMid_` 删除后更新后继节点
+- `popFront` 删除后更新新 first 为 `prev_len = 0`
+
+#### 5. 最后再做 cascadeUpdate_
+
+连锁更新的触发条件：
+
+```text
+某个 entry 的 prevlen 编码大小变化，导致这个 entry 自身 total_len 变化。
+这个 total_len 变化又可能让它的后继 entry 的 prevlen 编码大小变化。
+```
+
+建议接口：
+
+```cpp
+void cascadeUpdate_(std::size_t offset);
+```
+
+其中 `offset` 是第一个可能需要更新 prevlen 的节点位置。循环逻辑：
+
+```text
+while offset 不是 EndMarker:
+    解析当前 entry
+    根据前一个 entry 的实际 total_len 计算当前 entry 应写的 prevlen
+    如果 prevlen 编码大小不变且值也正确：可以停止
+    否则更新当前 entry 的 prevlen
+    如果当前 entry 的 total_len 因 prevlen 编码大小变化而变化：
+        继续处理下一个 entry
+    否则可以停止
+```
+
+#### 6. 明天建议的测试顺序
+
+不要一开始就测复杂连锁更新。按下面顺序补测试：
+
+1. `parseEntry_` 间接测试：插入一个长度让 entry 总长 `< 254` 的节点，行为保持不变。
+2. `pushBack` 测试：前一个 entry 长度 `>= 254` 时，后一个 entry 仍能正常遍历和 `popBack`。
+3. `pushFront` 测试：插入长 entry 后，旧 first 的 prevlen 从 1 byte 扩到 5 byte。
+4. `erase` 测试：删除长 entry 后，后继 prevlen 能恢复或保持正确。
+5. 最后才构造连续多个临界节点，测试 cascade update。
+
+#### 7. 验证命令
+
+每完成一个小步骤都跑：
+
+```bash
+cmake --build build --target ziplist_test
+ctest --test-dir build -R ZiplistTest --output-on-failure
+```
+
+如果某个测试疑似卡住，单独用：
+
+```bash
+timeout 5 build/ziplist_test --gtest_filter='ZiplistTest.具体测试名'
+```
+
 当前测试覆盖 `74` 个 GoogleTest 用例，覆盖基础操作、边界行为、渐进式 rehash、跳表范围操作和 intset 编码升级。
 
 目前 `HyperRedisCore` 仍然以头文件为主，因此 CMake 中核心库目标仍可以保持轻量；随着后续 `redisObject`、`redisDb` 和持久化相关 `.cpp` 文件加入，再逐步演进为更完整的核心库实现。

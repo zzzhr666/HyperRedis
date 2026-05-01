@@ -93,8 +93,20 @@ target_link_libraries(intset_test
         spdlog::spdlog
 )
 
+add_executable(ziplist_test
+    test/ziplist_test.cpp
+)
+
+target_link_libraries(ziplist_test
+    PRIVATE
+        GTest::gtest_main
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
 gtest_discover_tests(dict_test)
 gtest_discover_tests(skip_list_test)
 gtest_discover_tests(intset_test)
+gtest_discover_tests(ziplist_test)

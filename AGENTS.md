@@ -19,6 +19,21 @@ This repository is organized around `HyperRedisCore`, the non-server core of the
 
 At the current stage, `HyperRedisCore` may be configured as an `INTERFACE` placeholder until real core source files are added.
 
+## Collaboration Mode
+
+This project is also a learning project. When working on Redis data structures or storage components, prefer the following teaching-oriented workflow unless the user explicitly asks for direct implementation:
+
+- Explain the design idea, invariants, byte layout, and edge cases before code is written.
+- Split work into small steps that can be finished and tested in one sitting.
+- Let the user implement production code in headers or sources.
+- Review the user's implementation for correctness, undefined behavior, layout mistakes, naming/style issues, and future extensibility.
+- Write or adjust GoogleTest test files and CMake test wiring when needed.
+- Use tests as red/green checkpoints: add focused failing tests first, then let the user implement, then verify.
+- Do not rewrite the user's production implementation just to impose style; suggest fixes first unless the user asks for cleanup.
+- It is acceptable for the assistant to edit documentation, tests, and narrow mechanical style issues after implementation is working.
+
+For larger Redis-inspired structures such as `ziplist`, preserve the learning sequence: first teach the simplified model, then add Redis-like encoding details, then add edge cases such as cascading updates.
+
 ## Coding Style & Naming Conventions
 
 Use modern C++ with C++20 as the default build standard. Keep code compatible with C++17/20 design where practical.
