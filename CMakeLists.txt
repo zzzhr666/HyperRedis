@@ -11,8 +11,8 @@ find_package(GTest REQUIRED)
 
 
 set(STORAGE_ENGINE_SOURCES
-    # src/storage/database.cpp
-    # src/storage/object.cpp
+        src/storage/object.cpp
+        # src/storage/database.cpp
 )
 
 set(SERVER_SOURCES
@@ -104,9 +104,21 @@ target_link_libraries(ziplist_test
         spdlog::spdlog
 )
 
+add_executable(object_test
+    test/object_test.cpp
+)
+
+target_link_libraries(object_test
+    PRIVATE
+        GTest::gtest_main
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
 gtest_discover_tests(dict_test)
 gtest_discover_tests(skip_list_test)
 gtest_discover_tests(intset_test)
 gtest_discover_tests(ziplist_test)
+gtest_discover_tests(object_test)

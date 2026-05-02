@@ -289,7 +289,7 @@ namespace hyper {
             ziplistEntryView value;
         };
 
-        static bool tryParseInteger(std::string_view data, std::int64_t& out_value) {
+        static bool tryParseInteger_(std::string_view data, std::int64_t& out_value) {
             if (data.empty()) {
                 return false;
             }
@@ -315,7 +315,7 @@ namespace hyper {
 
         [[nodiscard]] static EncodingInfo determineEncoding_(std::string_view data) noexcept {
             EncodingInfo info;
-            if (tryParseInteger(data, info.int_value)) {
+            if (tryParseInteger_(data, info.int_value)) {
                 info.is_integer = true;
                 info.encoding_size = 1;
                 auto value = info.int_value;

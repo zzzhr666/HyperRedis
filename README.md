@@ -131,7 +131,15 @@ src/
 - `dict`：完成基础版哈希字典实现，并保留 Redis 风格的双表与渐进式 rehash 思路
 - `skipList`：完成基础跳表实现，支持有序插入、删除、排名查询、按分值范围查询与范围删除
 - `intset`：完成简化版整数集合实现，支持有序去重、二分查找、编码升级和紧凑字节存储
-- 测试基础设施：已接入 `GTest`，当前为 `linked_list`、`dict`、`skip_list`、`intset` 提供测试可执行文件
+- `redisObject`：完成核心对象模型实现，采用现代 C++ 的 `std::variant` + `std::unique_ptr` 架构，支持类型与编码分离。
+- 测试基础设施：已接入 `GTest`，为所有核心组件提供测试，累计覆盖 84 个用例。
+
+当前 `redisObject` 已具备的能力包括：
+
+- **String 类型**：支持 `Raw` (std::string) 和 `Int` (long) 编码，支持 `append` 操作时的自动解码（Int -> Raw）。
+- **Hash 类型**：支持基于 `dict` 的对象存储，实现了 `hset` / `hget` 接口，支持对象递归嵌套。
+- **List 类型**：支持 `ZipList` 和 `LinkedList` 双编码，实现了 `lpush`/`rpush`/`lpop`/`rpop`，支持从 `ZipList` 到 `LinkedList` 的透明自动升级。
+- **封装性**：采用 Passkey Pattern (Token 模式) 保证工厂方法的唯一性，并解决了 `std::unique_ptr` 处理不完整类型的架构难题。
 
 当前 `dict` 已具备的能力包括：
 
@@ -319,8 +327,8 @@ timeout 5 build/ziplist_test --gtest_filter='ZiplistTest.具体测试名'
 
 接下来的重点将从底层数据结构转向：
 
-- `redisObject`
-- `redisDb`
+- `Set` / `ZSet` 的对象层封装
+- `redisDb`：实现多数据库管理、主字典与过期字典
 - 简化版持久化流程（如 RDB save/load）
 
 在字符串实现上，本项目当前不会以 1:1 复刻 Redis SDS 为阶段目标，而是优先复用标准库字符串抽象；但在 `dict`、`skiplist`、`redisObject`、`redisDb` 等真正承载 Redis 核心设计的部分，仍然会优先保留书中的结构和思路。
