@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -316,6 +317,27 @@ TEST(DictTest, InsertOrAssignInsertsMissingAndUpdatesExisting) {
     EXPECT_EQ(*beta, 2);
     EXPECT_EQ(values.size(), 2U);
     spdlog::info("InsertOrAssignInsertsMissingAndUpdatesExisting: beta inserted with {}, final size {}", *beta, values.size());
+}
+
+TEST(DictTest, TransparentStringLookupAcceptsStringViewAndCString) {
+    dict<std::string, int, transparentStringHash, transparentStringEqual> values;
+
+    ASSERT_TRUE(values.insert("alpha", 1));
+    ASSERT_TRUE(values.insert("beta", 2));
+
+    std::string_view alpha_view{"alpha"};
+    EXPECT_TRUE(values.contains(alpha_view));
+    ASSERT_NE(values.get(alpha_view), nullptr);
+    EXPECT_EQ(*values.get(alpha_view), 1);
+
+    EXPECT_TRUE(values.contains("beta"));
+    ASSERT_NE(values.get("beta"), nullptr);
+    EXPECT_EQ(*values.get("beta"), 2);
+
+    EXPECT_TRUE(values.erase(std::string_view{"alpha"}));
+    EXPECT_FALSE(values.contains(alpha_view));
+    EXPECT_EQ(values.get(alpha_view), nullptr);
+    EXPECT_EQ(values.size(), 1U);
 }
 
 TEST(DictTest, CopyAndMoveOperationsRemainDisabled) {

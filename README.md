@@ -139,6 +139,7 @@ src/
 - **String 类型**：支持 `Raw` (std::string) 和 `Int` (long) 编码，支持 `append` 操作时的自动解码（Int -> Raw）。
 - **Hash 类型**：支持基于 `dict` 的对象存储，实现了 `hset` / `hget` 接口，支持对象递归嵌套。
 - **List 类型**：支持 `ZipList` 和 `LinkedList` 双编码，实现了 `lpush`/`rpush`/`lpop`/`rpop`，支持从 `ZipList` 到 `LinkedList` 的透明自动升级。
+- **ZSet 类型**：初步完成了基于 `ZipList` 编码的 `zsetAdd` 核心逻辑，支持按 (score, member) 有序存储，并设计了从 `ZipList` 到 `SkipList` 的转换机制与辅助解析接口。
 - **封装性**：采用 Passkey Pattern (Token 模式) 保证工厂方法的唯一性，并解决了 `std::unique_ptr` 处理不完整类型的架构难题。
 
 当前 `dict` 已具备的能力包括：
@@ -330,5 +331,24 @@ timeout 5 build/ziplist_test --gtest_filter='ZiplistTest.具体测试名'
 - `Set` / `ZSet` 的对象层封装
 - `redisDb`：实现多数据库管理、主字典与过期字典
 - 简化版持久化流程（如 RDB save/load）
+
+### ZSet 进度与后续任务
+
+当前已理顺 `zsetAdd` 在 `ZipList` 编码下的核心逻辑，采用了“升级拦截 -> 更新处理 -> 顺序查找 -> 插入与后置检查”的四阶段设计。
+
+#### 1. 完善 ZSet 辅助函数 (当前优先级)
+在 `src/storage/object.cpp` 中实现以下占位函数：
+- `parseScore_`：处理 `ziplist` 中 long 或 string 编码的 score 转 double。
+- `getEntryAsString_`：安全地将 `ziplist` 的 entryView 统一转为 `std::string`。
+- `formatScore_`：将 `double` 格式化为字符串存入 `ziplist`。
+
+#### 2. 实现 ZSet 编码转换
+- `convertZSetToSkiplist_`：将 `ziplist` 数据完整迁移至 `dict + skipList` 结构。
+
+#### 3. 补全 ZSet 公共接口
+- `zsetScore`
+- `zsetRemove`
+- `zsetSize`
+- `zsetForEach` (用于遍历和测试)
 
 在字符串实现上，本项目当前不会以 1:1 复刻 Redis SDS 为阶段目标，而是优先复用标准库字符串抽象；但在 `dict`、`skiplist`、`redisObject`、`redisDb` 等真正承载 Redis 核心设计的部分，仍然会优先保留书中的结构和思路。

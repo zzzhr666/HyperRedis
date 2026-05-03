@@ -5,10 +5,29 @@
 #include <concepts>
 #include <cstddef>
 #include <functional>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace hyper {
+    struct transparentStringHash {
+        using is_transparent = void;
+
+        [[nodiscard]] std::size_t operator()(std::string_view value) const noexcept {
+            return std::hash<std::string_view>{}(value);
+        }
+    };
+
+    struct transparentStringEqual {
+        using is_transparent = void;
+
+        [[nodiscard]] bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+            return lhs == rhs;
+        }
+    };
+
     template<typename K, typename V, typename Hash = std::hash<K>, typename KeyEqual = std::equal_to<K>>
     class dict {
     public:
@@ -76,42 +95,28 @@ namespace hyper {
         }
 
         bool erase(const K& k) {
-            if (isRehashing_()) {
-                rehashStep_();
-            }
+            return eraseImpl_(k);
+        }
 
-            int ht_num = isRehashing_() ? 2 : 1;
-            for (int i = 0; i < ht_num; ++i) {
-                if (hash_tables_[i].table.empty()) {
-                    continue;
-                }
-                std::size_t bucket_index = getBucketIndex_(hash_tables_[i], k);
-                dictEntry* current = hash_tables_[i].table[bucket_index];
-                dictEntry* prev = nullptr;
-                while (current) {
-                    if (key_equal_(current->key, k)) {
-                        if (prev == nullptr) {
-                            hash_tables_[i].table[bucket_index] = current->next;
-                        } else {
-                            prev->next = current->next;
-                        }
-
-                        delete current;
-                        --hash_tables_[i].used;
-                        if (!isRehashing_() && needShrink_()) {
-                            startRehash_(getShrinkTarget_());
-                            rehashStep_();
-                        }
-                        return true;
-                    }
-                    prev = current;
-                    current = current->next;
-                }
-            }
-            return false;
+        template<typename Q>
+            requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
+                      std::invocable<const Hash&, const Q&> &&
+                      std::predicate<const KeyEqual&, const Q&, const K&> &&
+                      std::predicate<const KeyEqual&, const K&, const Q&>)
+        bool erase(const Q& k) {
+            return eraseImpl_(k);
         }
 
         bool contains(const K& k) const {
+            return find_(k) != nullptr;
+        }
+
+        template<typename Q>
+            requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
+                      std::invocable<const Hash&, const Q&> &&
+                      std::predicate<const KeyEqual&, const Q&, const K&> &&
+                      std::predicate<const KeyEqual&, const K&, const Q&>)
+        bool contains(const Q& k) const {
             return find_(k) != nullptr;
         }
 
@@ -123,7 +128,31 @@ namespace hyper {
             return nullptr;
         }
 
+        template<typename Q>
+            requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
+                      std::invocable<const Hash&, const Q&> &&
+                      std::predicate<const KeyEqual&, const Q&, const K&> &&
+                      std::predicate<const KeyEqual&, const K&, const Q&>)
+        V* get(const Q& k) noexcept {
+            if (dictEntry* res = find_(k)) {
+                return &res->value;
+            }
+            return nullptr;
+        }
+
         const V* get(const K& k) const noexcept {
+            if (const dictEntry* res = find_(k)) {
+                return &res->value;
+            }
+            return nullptr;
+        }
+
+        template<typename Q>
+            requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
+                      std::invocable<const Hash&, const Q&> &&
+                      std::predicate<const KeyEqual&, const Q&, const K&> &&
+                      std::predicate<const KeyEqual&, const K&, const Q&>)
+        const V* get(const Q& k) const noexcept {
             if (const dictEntry* res = find_(k)) {
                 return &res->value;
             }
@@ -179,6 +208,43 @@ namespace hyper {
             std::size_t used{};
         };
 
+        template<typename Q>
+        bool eraseImpl_(const Q& k) {
+            if (isRehashing_()) {
+                rehashStep_();
+            }
+
+            int ht_num = isRehashing_() ? 2 : 1;
+            for (int i = 0; i < ht_num; ++i) {
+                if (hash_tables_[i].table.empty()) {
+                    continue;
+                }
+                std::size_t bucket_index = getBucketIndex_(hash_tables_[i], k);
+                dictEntry* current = hash_tables_[i].table[bucket_index];
+                dictEntry* prev = nullptr;
+                while (current) {
+                    if (key_equal_(current->key, k)) {
+                        if (prev == nullptr) {
+                            hash_tables_[i].table[bucket_index] = current->next;
+                        } else {
+                            prev->next = current->next;
+                        }
+
+                        delete current;
+                        --hash_tables_[i].used;
+                        if (!isRehashing_() && needShrink_()) {
+                            startRehash_(getShrinkTarget_());
+                            rehashStep_();
+                        }
+                        return true;
+                    }
+                    prev = current;
+                    current = current->next;
+                }
+            }
+            return false;
+        }
+
         void insertAtHead_(K k, V v) {
             dictHt& current_ht = isRehashing_() ? hash_tables_[1] : hash_tables_[0];
             std::size_t bucket_index = getBucketIndex_(current_ht, k);
@@ -188,7 +254,8 @@ namespace hyper {
             ++current_ht.used;
         }
 
-        dictEntry* find_(const K& k) {
+        template<typename Q>
+        dictEntry* find_(const Q& k) {
             if (auto res = findInTable_(hash_tables_[0], k)) {
                 return res;
             }
@@ -198,7 +265,8 @@ namespace hyper {
             return nullptr;
         }
 
-        const dictEntry* find_(const K& k) const {
+        template<typename Q>
+        const dictEntry* find_(const Q& k) const {
             if (auto res = findInTable_(hash_tables_[0], k)) {
                 return res;
             }
@@ -208,7 +276,8 @@ namespace hyper {
             return nullptr;
         }
 
-        dictEntry* findInTable_(dictHt& ht, const K& k) noexcept {
+        template<typename Q>
+        dictEntry* findInTable_(dictHt& ht, const Q& k) noexcept {
             if (ht.table.empty()) {
                 return nullptr;
             }
@@ -224,7 +293,8 @@ namespace hyper {
             return nullptr;
         }
 
-        const dictEntry* findInTable_(const dictHt& ht, const K& k) const noexcept {
+        template<typename Q>
+        const dictEntry* findInTable_(const dictHt& ht, const Q& k) const noexcept {
             if (ht.table.empty()) {
                 return nullptr;
             }
@@ -245,7 +315,8 @@ namespace hyper {
             return rehash_index_ != -1;
         }
 
-        std::size_t getBucketIndex_(const dictHt& ht, const K& k) const noexcept {
+        template<typename Q>
+        std::size_t getBucketIndex_(const dictHt& ht, const Q& k) const noexcept {
             assert(!ht.table.empty());
             return hash_(k) & ht.mask;
         }
