@@ -15,6 +15,7 @@
 # IDE and local tooling
 /.idea/
 /.codex
+.agents
 
 # Editor and OS temporary files
 *.swp

@@ -17,8 +17,8 @@ namespace hyper {
         bool min_inclusive = true;
         bool max_inclusive = true;
     };
-    template <typename Score, typename Value, typename ValueCompare = std::less<Value>>
-        requires std::totally_ordered<Score> && std::strict_weak_order<ValueCompare, const Value&, const Value&>
+    template <typename Score, typename Value, typename ValueCompare = std::less<>>
+        requires std::totally_ordered<Score>
     class skipList {
     public:
         static constexpr std::size_t MaxLevel = 32;
@@ -76,7 +76,8 @@ namespace hyper {
             return true;
         }
 
-        bool erase(const Score& score, const Value& value) {
+        template <typename V>
+        bool erase(const Score& score, const V& value) {
             std::array<skipListNode*, MaxLevel> update{};
             std::array<std::size_t, MaxLevel> rank{};
             findInsertPosition_(score, value, update, rank);
@@ -140,7 +141,8 @@ namespace hyper {
             return end - start + 1;
         }
 
-        bool contains(const Score& score, const Value& value) const {
+        template <typename V>
+        bool contains(const Score& score, const V& value) const {
             std::array<skipListNode*, MaxLevel> update{};
             std::array<std::size_t, MaxLevel> rank{};
             findInsertPosition_(score, value, update, rank);
@@ -175,7 +177,8 @@ namespace hyper {
             }
         }
 
-        [[nodiscard]] std::size_t getRank(const Score& score, const Value& value) const {
+        template <typename V>
+        [[nodiscard]] std::size_t getRank(const Score& score, const V& value) const {
             std::size_t rank{0};
             skipListNode* current = head_;
             for (int i = level_ - 1; i >= 0; --i) {
@@ -294,7 +297,8 @@ namespace hyper {
         };
 
     private:
-        bool less_(skipListNode const& current, Score const& target_score, Value const& target_value) const {
+        template <typename V>
+        bool less_(skipListNode const& current, Score const& target_score, const V& target_value) const {
             assert(!current.isHeader());
             if (current.score.value() == target_score) {
                 return value_compare_(current.value.value(), target_value);
@@ -302,13 +306,15 @@ namespace hyper {
             return current.score.value() < target_score;
         }
 
-        bool equal_(skipListNode const& current, Score const& target_score, Value const& target_value) const {
+        template <typename V>
+        bool equal_(skipListNode const& current, Score const& target_score, const V& target_value) const {
             assert(!current.isHeader());
             return current.score.value() == target_score && !value_compare_(current.value.value(), target_value) && !
                 value_compare_(target_value, current.value.value());
         }
 
-        void findInsertPosition_(const Score& score, const Value& value,
+        template <typename V>
+        void findInsertPosition_(const Score& score, const V& value,
                                  std::array<skipListNode*, MaxLevel>& update,
                                  std::array<std::size_t, MaxLevel>& rank) const {
             skipListNode* current = head_;

@@ -97,6 +97,17 @@ namespace hyper {
 
         void append(std::string_view str);
 
+        [[nodiscard]] std::size_t stringLen() const;
+
+        std::optional<long> stringIncrBy(long increment);
+
+        std::optional<double> stringIncrByFloat(double increment);
+
+        [[nodiscard]] std::string stringGetRange(int start, int end) const;
+
+        void stringSetRange(std::size_t offset, std::string_view value);
+
+
         // Hash object operations.
         bool hashSet(std::string field, std::shared_ptr<RedisObject> value);
 
@@ -139,6 +150,8 @@ namespace hyper {
         bool zSetRemove(std::string_view member);
 
         [[nodiscard]] std::size_t zSetSize() const;
+
+        std::optional<size_t> zSetRank(std::string_view member) const;
 
         // Encoding thresholds kept public for focused tests and learning checks.
         static constexpr std::size_t ZipListMaxEntries = 16; //for test, original: 512

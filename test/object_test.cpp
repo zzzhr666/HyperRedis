@@ -367,3 +367,49 @@ TEST(ObjectTest, SetForEachVisitsHashTableMembersAfterUpgrade) {
 
     EXPECT_EQ(members, (std::set<std::string>{"1", "hello", "world"}));
 }
+
+TEST(ObjectTest, StringAdvancedCommands) {
+    // 1. stringLen
+    auto obj1 = RedisObject::createStringObject("hello");
+    EXPECT_EQ(obj1->stringLen(), 5);
+    auto obj2 = RedisObject::createLongObject(100);
+    EXPECT_EQ(obj2->stringLen(), 3);
+
+    // 2. stringIncrBy
+    auto obj3 = RedisObject::createStringObject("10");
+    auto res3 = obj3->stringIncrBy(5);
+    ASSERT_TRUE(res3.has_value());
+    EXPECT_EQ(*res3, 15);
+    EXPECT_EQ(obj3->getEncoding(), ObjectEncoding::Int);
+
+    auto obj4 = RedisObject::createStringObject("not-a-number");
+    EXPECT_FALSE(obj4->stringIncrBy(5).has_value());
+
+    // 3. stringIncrByFloat
+    auto obj5 = RedisObject::createStringObject("10.5");
+    auto res5 = obj5->stringIncrByFloat(0.5);
+    ASSERT_TRUE(res5.has_value());
+    EXPECT_DOUBLE_EQ(*res5, 11.0);
+    EXPECT_EQ(obj5->getEncoding(), ObjectEncoding::Raw);
+
+    // 4. stringGetRange
+    auto obj6 = RedisObject::createStringObject("Hello World");
+    EXPECT_EQ(obj6->stringGetRange(0, 4), "Hello");
+    EXPECT_EQ(obj6->stringGetRange(-5, -1), "World");
+    EXPECT_EQ(obj6->stringGetRange(0, -1), "Hello World");
+    EXPECT_EQ(obj6->stringGetRange(100, 200), "");
+
+    // 5. stringSetRange
+    auto obj7 = RedisObject::createStringObject("hello");
+    obj7->stringSetRange(1, "i");
+    EXPECT_EQ(obj7->asString(), "hillo");
+    
+    obj7->stringSetRange(7, "world");
+    std::string expected = "hillo\0\0world";
+    std::string actual = obj7->asString();
+    EXPECT_EQ(actual.size(), 12);
+    EXPECT_EQ(actual[5], '\0');
+    EXPECT_EQ(actual[6], '\0');
+    EXPECT_EQ(actual.substr(7), "world");
+}
+

@@ -27,7 +27,7 @@
 - private 普通成员变量使用 `lower_snake_case_`，加尾随下划线，例如 `hash_tables_`、`rehash_index_`
 - struct 的数据字段不加尾随下划线，例如 `dictEntry::key`、`dictHt::used`
 - `static constexpr` 编译期常量使用 `PascalCase`，例如 `ExpandFactor`、`MinBucketSize`
-- 文件和目录名继续使用 `snake_case`
+- 文件 and 目录名继续使用 `snake_case`
 
 ## 实现原则
 
@@ -127,228 +127,39 @@ src/
 
 目前已完成的内容包括：
 
-- `linked_list`：完成基础双向链表实现，支持头尾插入删除、查找、删除、遍历和移动语义
-- `dict`：完成基础版哈希字典实现，并保留 Redis 风格的双表与渐进式 rehash 思路
-- `skipList`：完成基础跳表实现，支持有序插入、删除、排名查询、按分值范围查询与范围删除
-- `intset`：完成简化版整数集合实现，支持有序去重、二分查找、编码升级和紧凑字节存储
-- `redisObject`：完成核心对象模型实现，采用现代 C++ 的 `std::variant` + `std::unique_ptr` 架构，支持类型与编码分离。
-- 测试基础设施：已接入 `GTest`，为所有核心组件提供测试，累计覆盖 84 个用例。
-
-当前 `redisObject` 已具备的能力包括：
-
-- **String 类型**：支持 `Raw` (std::string) 和 `Int` (long) 编码，支持 `append` 操作时的自动解码（Int -> Raw）。
-- **Hash 类型**：支持基于 `dict` 的对象存储，实现了 `hset` / `hget` 接口，支持对象递归嵌套。
-- **List 类型**：支持 `ZipList` 和 `LinkedList` 双编码，实现了 `lpush`/`rpush`/`lpop`/`rpop`，支持从 `ZipList` 到 `LinkedList` 的透明自动升级。
-- **ZSet 类型**：初步完成了基于 `ZipList` 编码的 `zsetAdd` 核心逻辑，支持按 (score, member) 有序存储，并设计了从 `ZipList` 到 `SkipList` 的转换机制与辅助解析接口。
-- **封装性**：采用 Passkey Pattern (Token 模式) 保证工厂方法的唯一性，并解决了 `std::unique_ptr` 处理不完整类型的架构难题。
-
-当前 `dict` 已具备的能力包括：
-
-- 链地址法冲突处理
-- `insert` / `insertOrAssign` / `erase` / `contains` / `get`
-- 自动扩容与自动缩容
-- 渐进式 rehash
-- 基于 `forEach` 的遍历接口
-
-当前 `skipList` 已具备的能力包括：
-
-- 按 `(score, value)` 排序并拒绝完全重复元素
-- 维护 span 并支持 `getRank` / `getElementByRank`
-- 支持分值范围判断、首尾范围查找
-- 支持按 score 范围删除和按 rank 范围删除
-
-当前 `intset` 已具备的能力包括：
-
-- 使用 `std::vector<std::byte>` 保存连续紧凑整数数组
-- 根据元素范围在 `Int16` / `Int32` / `Int64` 之间升级编码
-- 保持元素有序且不允许重复
-- 支持 `insert` / `erase` / `contains` / `clear` / `forEach`
-- 通过 `byteSize` 观察当前紧凑存储占用
-
-当前 `ziplist` 已具备的能力包括：
-
-- 使用 `std::vector<std::byte>` 保存连续紧凑字节布局
-- 采用 C++ 简化 header：`zltail(4) + zllen(2) + zlend(1)`，总字节数由 `std::vector::size()` 管理
-- 支持字符串 entry 的 6-bit、14-bit、32-bit encoding 读写 helper
-- 当前 `prevlen` 仍为 1 byte 简化版，尚未支持 Redis 的 5 byte prevlen
-- 支持 `pushBack` / `pushFront` / `insert` / `erase` / `popFront` / `popBack`
-- 支持 `forEach` / `at` / `find`
-- 已引入 `ziplistEntryView`，当前只解析字符串，但接口已为后续整数 entry 留出空间
-
-### ziplist 下一步任务：变长 prevlen 与连锁更新
-
-下一次继续实现 `ziplist` 时，优先处理 `prevlen`，不要直接上连锁更新。建议按下面顺序推进。
-
-#### 1. 抽出 prevlen helper
-
-先新增并只使用这三个 helper：
-
-```cpp
-[[nodiscard]] static constexpr std::size_t prevLenSize_(std::size_t len) noexcept;
-void writePrevLen_(std::size_t offset, std::size_t prev_len);
-[[nodiscard]] std::pair<std::size_t, std::size_t> readPrevLen_(std::size_t offset) const;
-```
-
-目标语义：
-
-- `prev_len < 254`：占 1 byte，直接保存长度
-- `prev_len >= 254`：占 5 bytes，第 1 byte 写 `0xFE`，后 4 bytes 写 `std::uint32_t` 长度
-- `readPrevLen_()` 返回 `{prev_len_size, prev_len_value}`
-
-建议常量：
-
-```cpp
-static constexpr std::uint8_t BigPrevLenMarker = 0xFE;
-static constexpr std::size_t SmallPrevLenMax = 253;
-```
-
-#### 2. 改 parseEntry_
-
-当前 `parseEntry_()` 默认 `prevlen` 只有 1 byte。下一步要改成：
-
-```text
-prevlen_offset = offset
-{prev_len_size, prev_len_value} = readPrevLen_(prevlen_offset)
-encoding_offset = offset + prev_len_size
-{encoding_size, content_len} = readStringEncoding_(encoding_offset)
-content_offset = encoding_offset + encoding_size
-total_len = prev_len_size + encoding_size + content_len
-```
-
-`entryView` 中建议新增或替换字段：
-
-- `prev_len_size`
-- `prev_len`
-- `encoding_size`
-- `content_len`
-- `total_len`
-
-这样后续 `insert`、`erase`、`popBack` 不需要重复解析。
-
-#### 3. 改写入 entry 的路径
-
-所有写 entry 的地方都要从固定 1 byte prevlen 改成 helper：
-
-- `pushBack`
-- `pushFront`
-- `insertIntoMid_`
-
-新 entry 长度计算应变成：
-
-```text
-entry_len = prevLenSize_(prev_len) + stringEncodingSize_(data.size()) + data.size()
-```
-
-当前阶段可以先限制：
-
-```cpp
-assert(entry_len <= std::numeric_limits<std::uint32_t>::max());
-```
-
-但要注意：只有完成后继节点 prevlen 更新后，才真正允许大 entry 混入多个节点列表。
-
-#### 4. 抽后继 prevlen 更新函数
-
-先不要写完整 cascade，先写一个只更新直接后继的 helper：
-
-```cpp
-void updateNextPrevLen_(std::size_t next_offset, std::size_t new_prev_len);
-```
-
-它负责：
-
-- 如果 `next_offset` 指向 `EndMarker`，什么也不做
-- 比较旧 prevlen 编码大小和新 prevlen 编码大小
-- 编码大小相同：原地覆盖
-- 编码大小不同：先调整 buffer 空间，再写入新 prevlen
-
-这一步完成后，再接入：
-
-- `pushFront` 插入后更新旧 first
-- `insertIntoMid_` 插入后更新原 index 节点
-- `eraseFromMid_` 删除后更新后继节点
-- `popFront` 删除后更新新 first 为 `prev_len = 0`
-
-#### 5. 最后再做 cascadeUpdate_
-
-连锁更新的触发条件：
-
-```text
-某个 entry 的 prevlen 编码大小变化，导致这个 entry 自身 total_len 变化。
-这个 total_len 变化又可能让它的后继 entry 的 prevlen 编码大小变化。
-```
-
-建议接口：
-
-```cpp
-void cascadeUpdate_(std::size_t offset);
-```
-
-其中 `offset` 是第一个可能需要更新 prevlen 的节点位置。循环逻辑：
-
-```text
-while offset 不是 EndMarker:
-    解析当前 entry
-    根据前一个 entry 的实际 total_len 计算当前 entry 应写的 prevlen
-    如果 prevlen 编码大小不变且值也正确：可以停止
-    否则更新当前 entry 的 prevlen
-    如果当前 entry 的 total_len 因 prevlen 编码大小变化而变化：
-        继续处理下一个 entry
-    否则可以停止
-```
-
-#### 6. 明天建议的测试顺序
-
-不要一开始就测复杂连锁更新。按下面顺序补测试：
-
-1. `parseEntry_` 间接测试：插入一个长度让 entry 总长 `< 254` 的节点，行为保持不变。
-2. `pushBack` 测试：前一个 entry 长度 `>= 254` 时，后一个 entry 仍能正常遍历和 `popBack`。
-3. `pushFront` 测试：插入长 entry 后，旧 first 的 prevlen 从 1 byte 扩到 5 byte。
-4. `erase` 测试：删除长 entry 后，后继 prevlen 能恢复或保持正确。
-5. 最后才构造连续多个临界节点，测试 cascade update。
-
-#### 7. 验证命令
-
-每完成一个小步骤都跑：
-
-```bash
-cmake --build build --target ziplist_test
-ctest --test-dir build -R ZiplistTest --output-on-failure
-```
-
-如果某个测试疑似卡住，单独用：
-
-```bash
-timeout 5 build/ziplist_test --gtest_filter='ZiplistTest.具体测试名'
-```
-
-当前测试覆盖 `74` 个 GoogleTest 用例，覆盖基础操作、边界行为、渐进式 rehash、跳表范围操作和 intset 编码升级。
-
-目前 `HyperRedisCore` 仍然以头文件为主，因此 CMake 中核心库目标仍可以保持轻量；随着后续 `redisObject`、`redisDb` 和持久化相关 `.cpp` 文件加入，再逐步演进为更完整的核心库实现。
-
-接下来的重点将从底层数据结构转向：
-
-- `Set` / `ZSet` 的对象层封装
-- `redisDb`：实现多数据库管理、主字典与过期字典
-- 简化版持久化流程（如 RDB save/load）
-
-### ZSet 进度与后续任务
-
-当前已理顺 `zsetAdd` 在 `ZipList` 编码下的核心逻辑，采用了“升级拦截 -> 更新处理 -> 顺序查找 -> 插入与后置检查”的四阶段设计。
-
-#### 1. 完善 ZSet 辅助函数 (当前优先级)
-在 `src/storage/object.cpp` 中实现以下占位函数：
-- `parseScore_`：处理 `ziplist` 中 long 或 string 编码的 score 转 double。
-- `getEntryAsString_`：安全地将 `ziplist` 的 entryView 统一转为 `std::string`。
-- `formatScore_`：将 `double` 格式化为字符串存入 `ziplist`。
-
-#### 2. 实现 ZSet 编码转换
-- `convertZSetToSkiplist_`：将 `ziplist` 数据完整迁移至 `dict + skipList` 结构。
-
-#### 3. 补全 ZSet 公共接口
-- `zsetScore`
-- `zsetRemove`
-- `zsetSize`
-- `zsetForEach` (用于遍历和测试)
-
-在字符串实现上，本项目当前不会以 1:1 复刻 Redis SDS 为阶段目标，而是优先复用标准库字符串抽象；但在 `dict`、`skiplist`、`redisObject`、`redisDb` 等真正承载 Redis 核心设计的部分，仍然会优先保留书中的结构和思路。
+- **底层数据结构**：
+    - `linked_list`：基础双向链表，支持双端操作、查找与遍历。
+    - `dict`：支持渐进式 rehash 的哈希字典，支持透明字符串查找。
+    - `skipList`：支持分值/排名双维度查询的高效跳表，已实现 C++20 透明查找优化。
+    - `intset`：支持自动编码升级（Int16/32/64）的紧凑整数集合。
+    - `ziplist`：初步实现紧凑字节布局，支持变长字符串 entry 编码。
+- **核心对象模型 (RedisObject)**：
+    - **String**：支持 `Raw` (std::string) 与 `Int` (long) 编码。实现了 `append`、`stringLen`、`incrBy` (支持自动转 Int)、`incrByFloat`、`getRange` (支持负数索引)、`setRange` (支持 \0 填充)。
+    - **Hash**：基于 `dict` 实现，支持 `hset`/`hget` 及递归对象嵌套。
+    - **List**：支持 `ZipList` 到 `LinkedList` 的透明自动升级，实现了双端推拉操作。
+    - **Set**：支持 `IntSet` 到 `HashTable` 的透明自动升级，支持数值与字符串成员混合存储。
+    - **ZSet**：支持 `ZipList` 到 `SkipList` 的透明自动升级。实现了 `zadd`、`zscore`、`zrem`、`zcard`、`zrank` 等核心语义。
+- **工程化**：
+    - 采用 **Passkey Pattern** 保证对象工厂的安全调用。
+    - 针对 `std::unique_ptr` 配合 `std::variant` 处理不完整类型的挑战，设计了高效的解耦方案。
+    - **测试保障**：已接入 GoogleTest，累计覆盖 **100+** 个测试用例，涵盖基础边界、编码升级、数据一致性等。
+
+### ZSet 已具备的能力
+
+- **双编码切换**：成员数量超过 16 个或成员长度超过 64 字节时，自动从 `ZipList` 升级到 `dict + skipList` 结构。
+- **高效查询**：跳表支持 `getRank` 和 `erase` 等操作的 **透明查找 (Transparent Lookup)**，查找 `std::string_view` 无需构造临时字符串。
+- **排序语义**：严格遵循 Redis 标准，分值相同时按成员名字典序排列。
+- **核心辅助**：基于 `std::from_chars` 和 `std::to_chars` 实现了极高性能的 score 解析与格式化。
+
+### String 已具备的能力
+
+- **智能编码**：`incrBy` 操作时如果字符串是合法整数，会自动将编码由 `Raw` 优化为 `Int` 以节省内存并加速后续运算。
+- **健壮性**：`incrBy` 系列操作在解析失败时能保持原数据不被破坏（通过 `std::optional` 错误处理机制）。
+- **完全兼容**：`getRange` 严格遵循 Redis 风格的负数索引转换与边界截断逻辑；`setRange` 完美处理越界填充。
+
+## 接下来的重点
+
+- `redisDb`：实现多数据库管理、主字典与过期字典逻辑。
+- 过期策略：实现惰性删除与定期删除思路。
+- 持久化：初步探索 RDB 快照的 save/load 流程。
+- 服务器接入：基于 Muduo 的网络层集成（后续阶段）。

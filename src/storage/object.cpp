@@ -1,13 +1,14 @@
+#include <array>
+#include <cassert>
 #include <charconv>
 #include <memory>
-#include <cassert>
 
 #include "hyper/storage/object.hpp"
-#include "hyper/datastructures/intset.hpp"
-#include "hyper/datastructures/ziplist.hpp"
 #include "hyper/datastructures/dict.hpp"
+#include "hyper/datastructures/intset.hpp"
 #include "hyper/datastructures/linked_list.hpp"
 #include "hyper/datastructures/skip_list.hpp"
+#include "hyper/datastructures/ziplist.hpp"
 
 
 namespace hyper {
@@ -93,6 +94,104 @@ void hyper::RedisObject::append(std::string_view str) {
         encoding_ = ObjectEncoding::Raw;
     }
     std::get<std::string>(data_).append(str);
+}
+
+std::size_t hyper::RedisObject::stringLen() const {
+    assert(type_ == ObjectType::String);
+    if (encoding_ == ObjectEncoding::Int) {
+        return std::to_string(std::get<long>(data_)).size();
+    }
+    if (encoding_ == ObjectEncoding::Raw) {
+        return std::get<std::string>(data_).size();
+    }
+    assert(false);
+    return 0;
+}
+
+std::optional<long> hyper::RedisObject::stringIncrBy(long increment) {
+    assert(type_ == ObjectType::String);
+    if (encoding_ == ObjectEncoding::Int) {
+        auto& res = std::get<long>(data_);
+        res += increment;
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::Raw) {
+        long value{};
+        auto& origin = std::get<std::string>(data_);
+        auto [ptr,ec] = std::from_chars(origin.data(), origin.data() + origin.size(), value);
+        if (ptr == origin.data() + origin.size() && ec == std::errc()) {
+            value += increment;
+            encoding_ = ObjectEncoding::Int;
+            data_ = value;
+            return value;
+        }
+        return std::nullopt;
+    }
+    assert(false);
+    return std::nullopt;
+}
+
+std::optional<double> hyper::RedisObject::stringIncrByFloat(double increment) {
+    assert(type_ == ObjectType::String);
+    double value{};
+    if (encoding_ == ObjectEncoding::Int) {
+        value = std::get<long>(data_);
+    } else if (encoding_ == ObjectEncoding::Raw) {
+        auto& str = std::get<std::string>(data_);
+        auto [ptr,ec] = std::from_chars(str.data(), str.data() + str.size(), value);
+        if (ptr != str.data() + str.size() || ec != std::errc()) {
+            return std::nullopt;
+        }
+    }
+    value += increment;
+    auto fmt_str = formatScore_(value);
+    encoding_ = ObjectEncoding::Raw;
+    data_ = std::move(fmt_str);
+    return value;
+}
+
+std::string hyper::RedisObject::stringGetRange(int start, int end) const {
+    assert(type_ == ObjectType::String);
+    std::string str = asString();
+    std::size_t len = str.size();
+    if (str.empty()) {
+        return {};
+    }
+    if (start < 0) {
+        start += len;
+    }
+    if (end < 0) {
+        end += len;
+    }
+    if (start < 0 ) {
+        start = 0;
+    }
+    if (end < 0) {
+        end = 0;
+    }
+
+    if (end >= len) {
+        end = len -1;
+    }
+    if (start > end) {
+        return {};
+    }
+    return str.substr(start,end - start + 1);
+}
+
+void hyper::RedisObject::stringSetRange(std::size_t offset, std::string_view value) {
+    assert(type_ ==ObjectType::String);
+    if (encoding_== ObjectEncoding::Int) {
+        data_ = std::to_string(std::get<long>(data_));
+        encoding_ = ObjectEncoding::Raw;
+    }
+    auto& s = std::get<std::string>(data_);
+    if (offset + value.size() > s.size()) {
+        s.resize(offset + value.size());
+    }
+    if (!value.empty()) {
+        std::ranges::copy(value,s.begin() + offset);
+    }
 }
 
 bool hyper::RedisObject::hashSet(std::string field, std::shared_ptr<RedisObject> value) {
@@ -389,6 +488,88 @@ bool hyper::RedisObject::zSetAdd(std::string member, double score) {
     return false;
 }
 
+std::optional<double> hyper::RedisObject::zSetScore(std::string_view member) const {
+    assert(type_ == ObjectType::ZSet);
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        auto res_op = ziplist->find(member);
+        if (res_op.has_value() && res_op.value() % 2 == 0) {
+            return parseScore_(ziplist->at(res_op.value() + 1).value());
+        }
+        return std::nullopt;
+    }
+    if (encoding_ == ObjectEncoding::SkipList) {
+        double* res = std::get<std::unique_ptr<RedisZSet>>(data_)->score.get(member);
+        if (res) {
+            return *res;
+        }
+        return std::nullopt;
+    }
+    assert(false);
+    return std::nullopt;
+}
+
+bool hyper::RedisObject::zSetRemove(std::string_view member) {
+    assert(type_ == ObjectType::ZSet);
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        auto res = ziplist->find(member);
+        if (res.has_value() && res.value() % 2 == 0) {
+            ziplist->erase(res.value());
+            ziplist->erase(res.value());
+            return true;
+        }
+        return false;
+    }
+    if (encoding_ == ObjectEncoding::SkipList) {
+        auto& z_set = std::get<std::unique_ptr<RedisZSet>>(data_);
+        if (auto score = z_set->score.get(member)) {
+            z_set->order.erase(*score, member);
+            z_set->score.erase(member);
+            return true;
+        }
+        return false;
+    }
+
+    assert(false);
+    return false;
+}
+
+std::size_t hyper::RedisObject::zSetSize() const {
+    assert(type_ == ObjectType::ZSet);
+    if (encoding_ == ObjectEncoding::ZipList) {
+        return std::get<std::unique_ptr<RedisZiplist>>(data_)->size() / 2;
+    }
+    if (encoding_ == ObjectEncoding::SkipList) {
+        return std::get<std::unique_ptr<RedisZSet>>(data_)->score.size();
+    }
+    assert(false);
+    return 0;
+}
+
+std::optional<size_t> hyper::RedisObject::zSetRank(std::string_view member) const {
+    assert(type_ == ObjectType::ZSet);
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        auto res = ziplist->find(member);
+        if (res.has_value() && res.value() % 2 == 0) {
+            return res.value() / 2;
+        }
+        return std::nullopt;
+    }
+
+    if (encoding_ == ObjectEncoding::SkipList) {
+        auto& z_set = std::get<std::unique_ptr<RedisZSet>>(data_);
+        if (auto res = z_set->score.get(member)) {
+            return z_set->order.getRank(*res, std::string(member)) - 1;
+        }
+        return std::nullopt;
+    }
+
+    assert(false);
+    return std::nullopt;
+}
+
 bool hyper::RedisObject::shouldConvertZiplistToList_(std::string_view value, std::size_t next_size) noexcept {
     return next_size > ZipListMaxEntries || value.size() > ZipListMaxValue;
 }
@@ -440,24 +621,60 @@ std::optional<long> hyper::RedisObject::parseSetIntegerMember_(std::string_view 
 }
 
 void hyper::RedisObject::convertZSetToSkiplist_() {
-    // TODO: Implement tomorrow
-    assert(false && "Not implemented yet");
+    assert(type_ == ObjectType::ZSet && encoding_ == ObjectEncoding::ZipList);
+    auto z_set = std::make_unique<RedisZSet>();
+    auto ziplist = std::move(std::get<std::unique_ptr<RedisZiplist>>(data_));
+    bool is_member = true;
+    std::string member;
+    ziplist->forEach([&is_member,&z_set,&member](const ziplistEntryView& entry_view) {
+        if (is_member) {
+            member = getEntryAsString_(entry_view);
+            is_member = !is_member;
+            return;
+        }
+        auto score = parseScore_(entry_view);
+        z_set->order.insert(score, member);
+        z_set->score.insert(std::move(member), score);
+        is_member = !is_member;
+    });
+    encoding_ = ObjectEncoding::SkipList;
+    data_ = std::move(z_set);
 }
 
+
 double hyper::RedisObject::parseScore_(const ziplistEntryView& entry) {
-    // TODO: Implement tomorrow
-    assert(false && "Not implemented yet");
+    if (entry.isInteger()) {
+        return static_cast<double>(entry.integer());
+    }
+    if (entry.isString()) {
+        double value{};
+        auto str = entry.string();
+        auto [ptr,ec] = std::from_chars(str.data(), str.data() + str.size(), value);
+        if (ptr == str.data() + str.size() && ec == std::errc()) {
+            return value;
+        }
+    }
+    assert(false);
     return 0.0;
 }
 
 std::string hyper::RedisObject::getEntryAsString_(const ziplistEntryView& entry) {
-    // TODO: Implement tomorrow
-    assert(false && "Not implemented yet");
+    if (entry.isInteger()) {
+        return std::to_string(entry.integer());
+    }
+    if (entry.isString()) {
+        return std::string(entry.string());
+    }
+    assert(false);
     return "";
 }
 
 std::string hyper::RedisObject::formatScore_(double score) {
-    // TODO: Implement tomorrow
-    assert(false && "Not implemented yet");
+    std::array<char, 128> buffer{};
+    auto [ptr,ec] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), score);
+    if (ec == std::errc()) {
+        return {buffer.data(), ptr};
+    }
+    assert(false);
     return "";
 }
