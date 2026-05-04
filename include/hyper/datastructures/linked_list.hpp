@@ -4,7 +4,7 @@
 #include <utility>
 
 namespace hyper {
-    template<typename T>
+    template <typename T>
     struct listNode {
         listNode* next;
         listNode* prev;
@@ -13,7 +13,7 @@ namespace hyper {
         listNode(T data, listNode* next, listNode* prev) : next(next), prev(prev), data(std::move(data)) {}
     };
 
-    template<typename T>
+    template <typename T>
     class list {
     public:
         list() : length_(0), head_(nullptr), tail_(nullptr) {}
@@ -89,6 +89,34 @@ namespace hyper {
                 tail_->next = new_node;
                 tail_ = new_node;
             }
+            ++length_;
+        }
+
+        void insertBefore(listNode<T>* node, T data) {
+            if (!node) {
+                return;
+            }
+            if (node == head_) {
+                pushFront(std::move(data));
+                return;
+            }
+            auto new_node = new listNode<T>(std::move(data), node, node->prev);
+            node->prev->next = new_node;
+            node->prev = new_node;
+            ++length_;
+        }
+
+        void insertAfter(listNode<T>* node, T data) {
+            if (!node) {
+                return;
+            }
+            if (node == tail_) {
+                pushBack(std::move(data));
+                return;
+            }
+            auto new_node = new listNode<T>(std::move(data), node->next, node);
+            node->next->prev = new_node;
+            node->next = new_node;
             ++length_;
         }
 
@@ -192,8 +220,8 @@ namespace hyper {
         }
 
         //helper
-        template<typename Pred>
-            requires std::invocable<Pred,const T&>
+        template <typename Pred>
+            requires std::invocable<Pred, const T&>
         void forEach(const Pred& pred) const {
             auto it = head_;
             while (it) {
@@ -203,8 +231,8 @@ namespace hyper {
             }
         }
 
-        template<typename Pred>
-            requires std::invocable<Pred,T&>
+        template <typename Pred>
+            requires std::invocable<Pred, T&>
         void forEach(const Pred& pred) {
             auto it = head_;
             while (it) {
@@ -231,9 +259,19 @@ namespace hyper {
                 return *this;
             }
 
+            iterator& operator--() {
+                current_ = current_->prev;
+                return *this;
+            }
+
             iterator operator++(int) {
                 auto tmp = *this;
                 current_ = current_->next;
+                return tmp;
+            }
+            iterator operator--(int) {
+                auto tmp = *this;
+                current_ = current_->prev;
                 return tmp;
             }
 
@@ -245,12 +283,20 @@ namespace hyper {
                 return current_ != other.current_;
             }
 
+            listNode<T>* get() const {
+                return current_;
+            }
+
         private:
             listNode<T>* current_;
         };
 
         iterator begin() {
             return iterator{head_};
+        }
+
+        iterator tail() {
+            return iterator{tail_};
         }
 
 

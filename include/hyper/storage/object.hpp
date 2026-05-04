@@ -130,6 +130,18 @@ namespace hyper {
 
         std::shared_ptr<RedisObject> listRightPop();
 
+        std::size_t listLen() const;
+
+        std::shared_ptr<RedisObject> listIndex(int index) const;
+
+        bool listSet(int index ,const std::shared_ptr<RedisObject>& value);
+
+        std::optional<std::size_t> listInsert(std::string_view pivot,const std::shared_ptr<RedisObject>& value,bool before);
+
+        std::size_t listRemove(int count,std::string_view value);
+
+        void listTrim(int start,int end);
+
         // Set object operations.
         bool setAdd(std::string_view member);
 

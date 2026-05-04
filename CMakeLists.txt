@@ -126,6 +126,17 @@ target_link_libraries(zset_test
         spdlog::spdlog
 )
 
+add_executable(object_stress_test
+    test/object_stress_test.cpp
+)
+
+target_link_libraries(object_stress_test
+    PRIVATE
+        GTest::gtest_main
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
 gtest_discover_tests(dict_test)
@@ -134,3 +145,4 @@ gtest_discover_tests(intset_test)
 gtest_discover_tests(ziplist_test)
 gtest_discover_tests(object_test)
 gtest_discover_tests(zset_test)
+gtest_discover_tests(object_stress_test)

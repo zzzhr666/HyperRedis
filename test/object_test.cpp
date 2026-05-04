@@ -181,6 +181,90 @@ TEST(ObjectTest, ListBasicOperations) {
     EXPECT_EQ(listObj->listLeftPop(), nullptr);
 }
 
+TEST(ObjectTest, ListInsert) {
+    auto listObj = RedisObject::createListObject();
+    // 初始: ["a", "c"]
+    listObj->listRightPush(RedisObject::createStringObject("a"));
+    listObj->listRightPush(RedisObject::createStringObject("c"));
+
+    // 1. ZipList 插入 (Before)
+    auto res1 = listObj->listInsert("c", RedisObject::createStringObject("b"), true);
+    ASSERT_TRUE(res1.has_value());
+    EXPECT_EQ(*res1, 3);
+    EXPECT_EQ(listObj->listLen(), 3);
+    // 现在: ["a", "b", "c"]
+    EXPECT_EQ(listObj->listIndex(1)->asString(), "b");
+
+    // 2. ZipList 插入 (After)
+    auto res2 = listObj->listInsert("c", RedisObject::createStringObject("d"), false);
+    ASSERT_TRUE(res2.has_value());
+    EXPECT_EQ(*res2, 4);
+    EXPECT_EQ(listObj->listLen(), 4);
+    // 现在: ["a", "b", "c", "d"]
+    EXPECT_EQ(listObj->listIndex(3)->asString(), "d");
+
+    // 3. Pivot 不存在
+    EXPECT_FALSE(listObj->listInsert("e", RedisObject::createStringObject("x"), true).has_value());
+
+    // 4. LinkedList 编码下测试 (插入足够多元素触发转换)
+    for (int i = 0; i < 20; ++i) {
+        listObj->listRightPush(RedisObject::createStringObject(std::to_string(i)));
+    }
+    EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
+
+    // 在 LinkedList 插入
+    auto res3 = listObj->listInsert("0", RedisObject::createStringObject("before_0"), true);
+    ASSERT_TRUE(res3.has_value());
+    EXPECT_EQ(*res3, listObj->listLen());
+}
+
+TEST(ObjectTest, ListRemove) {
+    auto listObj = RedisObject::createListObject();
+    // 初始: ["a", "b", "a", "c", "a"]
+    listObj->listRightPush(RedisObject::createStringObject("a"));
+    listObj->listRightPush(RedisObject::createStringObject("b"));
+    listObj->listRightPush(RedisObject::createStringObject("a"));
+    listObj->listRightPush(RedisObject::createStringObject("c"));
+    listObj->listRightPush(RedisObject::createStringObject("a"));
+
+    // 1. 删除前 2 个 "a" (from_front)
+    EXPECT_EQ(listObj->listRemove(2, "a"), 2);
+    EXPECT_EQ(listObj->listLen(), 3);
+    
+    // 剩下: ["b", "c", "a"]
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "b");
+    EXPECT_EQ(listObj->listIndex(1)->asString(), "c");
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "a");
+
+    // 2. 删除所有 "a" (count = 0)
+    EXPECT_EQ(listObj->listRemove(0, "a"), 1);
+    EXPECT_EQ(listObj->listLen(), 2);
+    
+    // 剩下: ["b", "c"]
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "b");
+    EXPECT_EQ(listObj->listIndex(1)->asString(), "c");
+
+    // 3. 测试反向删除 (from_back)
+    listObj->listRightPush(RedisObject::createStringObject("b"));
+    listObj->listRightPush(RedisObject::createStringObject("b"));
+    // 现在: ["b", "c", "b", "b"]
+    
+    // 删除最后 2 个 "b"
+    EXPECT_EQ(listObj->listRemove(-2, "b"), 2);
+    // 剩下: ["b", "c"]
+    EXPECT_EQ(listObj->listLen(), 2);
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "b");
+    EXPECT_EQ(listObj->listIndex(1)->asString(), "c");
+
+    // 4. LinkedList 下的删除测试
+    for (int i = 0; i < 20; ++i) {
+        listObj->listRightPush(RedisObject::createStringObject("x"));
+    }
+    EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
+    EXPECT_EQ(listObj->listRemove(10, "x"), 10);
+    EXPECT_EQ(listObj->listRemove(-10, "x"), 10);
+}
+
 TEST(ObjectTest, ListMixedTypeAndEncoding) {
     auto listObj = RedisObject::createListObject();
     
@@ -413,3 +497,39 @@ TEST(ObjectTest, StringAdvancedCommands) {
     EXPECT_EQ(actual.substr(7), "world");
 }
 
+
+TEST(ObjectTest, ListTrim) {
+    auto listObj = RedisObject::createListObject();
+    // 初始: ["0", "1", "2", "3", "4"]
+    for (int i = 0; i < 5; ++i) {
+        listObj->listRightPush(RedisObject::createStringObject(std::to_string(i)));
+    }
+
+    // 1. 正常裁剪中间部分: LTRIM 1 3 -> ["1", "2", "3"]
+    listObj->listTrim(1, 3);
+    EXPECT_EQ(listObj->listLen(), 3);
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "1");
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "3");
+
+    // 2. 使用负数索引: LTRIM 0 -1 (保持不变)
+    listObj->listTrim(0, -1);
+    EXPECT_EQ(listObj->listLen(), 3);
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "1");
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "3");
+
+    // 3. 越界裁剪到空: LTRIM 5 2
+    listObj->listTrim(5, 2);
+    EXPECT_EQ(listObj->listLen(), 0);
+    EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::ZipList); // 验证是否重置了编码
+
+    // 4. LinkedList 编码下的裁剪
+    for (int i = 0; i < 20; ++i) {
+        listObj->listRightPush(RedisObject::createLongObject(i));
+    }
+    EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
+    
+    listObj->listTrim(0, 9); // 保留前 10 个 (0-9)
+    EXPECT_EQ(listObj->listLen(), 10);
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "0");
+    EXPECT_EQ(listObj->listIndex(9)->asString(), "9");
+}

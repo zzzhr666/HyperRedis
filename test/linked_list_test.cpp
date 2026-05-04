@@ -126,6 +126,45 @@ TEST(LinkedListTest, ForEachAndIteratorTraverseElements) {
     EXPECT_EQ(it, values.end());
 }
 
+TEST(LinkedListTest, InsertBeforeAndAfterModifyListCorrectly) {
+    list<int> values;
+
+    // Test on empty list (null node should do nothing)
+    values.insertBefore(nullptr, 1);
+    EXPECT_TRUE(values.empty());
+
+    values.pushBack(10);
+    values.pushBack(30);
+    log_snapshot("initial insert test values", values);
+
+    // Insert in the middle
+    auto* node30 = values.find(30);
+    values.insertBefore(node30, 20);
+    log_snapshot("after insertBefore(30, 20)", values);
+    EXPECT_EQ(snapshot(values), (std::vector<int>{10, 20, 30}));
+
+    // Insert at the head
+    auto* node10 = values.find(10);
+    values.insertBefore(node10, 5);
+    log_snapshot("after insertBefore(10, 5)", values);
+    EXPECT_EQ(snapshot(values), (std::vector<int>{5, 10, 20, 30}));
+    EXPECT_EQ(values.front(), 5);
+
+    // Insert in the middle after
+    auto* node20 = values.find(20);
+    values.insertAfter(node20, 25);
+    log_snapshot("after insertAfter(20, 25)", values);
+    EXPECT_EQ(snapshot(values), (std::vector<int>{5, 10, 20, 25, 30}));
+
+    // Insert at the tail
+    auto* node30_new = values.find(30);
+    values.insertAfter(node30_new, 35);
+    log_snapshot("after insertAfter(30, 35)", values);
+    EXPECT_EQ(snapshot(values), (std::vector<int>{5, 10, 20, 25, 30, 35}));
+    EXPECT_EQ(values.back(), 35);
+    EXPECT_EQ(values.size(), 6U);
+}
+
 TEST(LinkedListTest, MoveOperationsTransferOwnership) {
     static_assert(!std::is_copy_constructible_v<list<int>>);
     static_assert(!std::is_copy_assignable_v<list<int>>);
