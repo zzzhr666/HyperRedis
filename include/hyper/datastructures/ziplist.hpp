@@ -723,6 +723,7 @@ namespace hyper {
                 return {5, len};
             }
             assert(false);
+            return {};
         }
 
         [[nodiscard]] static constexpr std::size_t prevLenSize_(std::size_t len) noexcept {
