@@ -7,6 +7,7 @@ This repository is organized around `HyperRedisCore`, the non-server core of the
 - `include/hyper/datastructures`, `src/datastructures`: low-level data structures
 - `include/hyper/storage`, `src/storage`: storage engine and core object model
 - `include/hyper/server`, `src/server`: future server-side code
+- `test`: GoogleTest-based unit, stress, and Redis-behavior tests
 
 `CMakeLists.txt` is the source of truth for build inputs. Add new `.cpp` files to the correct `set(...)` block and keep the lists explicit. Do not use `file(GLOB ...)`. Do not create placeholder `.cpp` or `.hpp` files before implementation starts.
 
@@ -14,10 +15,10 @@ This repository is organized around `HyperRedisCore`, the non-server core of the
 
 - `cmake -S . -B build`: configure a local build directory
 - `cmake --build build`: build the current targets
-- `ctest --test-dir build`: run tests after CTest entries are added
+- `ctest --test-dir build`: run all registered GoogleTest/CTest tests
 - `cmake -S . -B /tmp/hyperredis-check`: quick clean configure check without reusing IDE output
 
-At the current stage, `HyperRedisCore` may be configured as an `INTERFACE` placeholder until real core source files are added.
+`HyperRedisCore` is currently a static core library built from the storage/object implementation and header-only data structures. Server targets are intentionally not wired yet.
 
 ## Collaboration Mode
 
@@ -54,7 +55,9 @@ Prefer small, focused headers and keep dependencies local to each module.
 
 ## Testing Guidelines
 
-No test framework is wired in yet. When tests are introduced, place them under `tests/` and register them with CTest. Name files like `skip_list_test.cpp` or `database_test.cpp`. Cover normal cases, boundary cases, and invariants for each data structure or storage component.
+GoogleTest is wired through CMake and discovered by CTest. Place tests under `test/` and register new test executables explicitly in `CMakeLists.txt`. Name files like `skip_list_test.cpp`, `redis_object_redis_behavior_test.cpp`, or `database_test.cpp`. Cover normal cases, boundary cases, encoding transitions, and invariants for each data structure or storage component.
+
+Current coverage includes low-level data structures, RedisObject behavior, stress tests, and Redis-visible behavior checks. When changing object-layer behavior, run the full suite with `ctest --test-dir build` or a clean `/tmp/hyperredis-check` build.
 
 ## Commit & Pull Request Guidelines
 

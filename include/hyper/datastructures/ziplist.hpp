@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -109,6 +110,21 @@ namespace hyper {
                 offset += entry_view.total_len;
             }
             return std::nullopt;
+        }
+
+        ziplistEntryView operator[](std::size_t index) const {
+            assert(index < size());
+            std::size_t offset = HeaderSize;
+            std::size_t current_index{0};
+            while (entries_[offset]!= EndMarker) {
+                auto entry_view = parseEntry_(offset);
+                if (current_index++ == index) {
+                    return entry_view.value;
+                }
+                offset += entry_view.total_len;
+            }
+            assert(false);
+            return ziplistEntryView::fromString("");
         }
 
         [[nodiscard]] std::optional<std::size_t> find(std::string_view value) const {
@@ -226,6 +242,33 @@ namespace hyper {
             }
 
             return false;
+        }
+
+        std::size_t eraseRange(std::size_t index, std::size_t count) {
+            auto len = getLen_();
+            if (index >= len || count == 0) {
+                return 0;
+            }
+
+            auto removed_count = std::min(count, len - index);
+            if (removed_count == len) {
+                initialize_();
+                return removed_count;
+            }
+
+            std::size_t current_index{0};
+            std::size_t offset = HeaderSize;
+            while (entries_[offset] != EndMarker) {
+                auto entry_view = parseEntry_(offset);
+                if (current_index == index) {
+                    eraseRange_(entry_view, removed_count);
+                    return removed_count;
+                }
+                ++current_index;
+                offset += entry_view.total_len;
+            }
+
+            return 0;
         }
 
         bool insert(std::size_t index, std::string_view data) {
@@ -503,6 +546,52 @@ namespace hyper {
 
             setLen_(getLen_() - 1);
             cascadeUpdate_(entry_view.offset);
+        }
+
+        void eraseRange_(const entryView& first_entry, std::size_t count) {
+            std::size_t next_offset = first_entry.offset;
+            for (std::size_t i = 0; i < count; ++i) {
+                auto entry_view = parseEntry_(next_offset);
+                next_offset += entry_view.total_len;
+            }
+
+            if (entries_[next_offset] == EndMarker) {
+                entries_[first_entry.offset] = EndMarker;
+                entries_.resize(entries_.size() - (next_offset - first_entry.offset));
+                if (first_entry.offset == HeaderSize) {
+                    setTail_(HeaderSize);
+                } else {
+                    setTail_(first_entry.offset - first_entry.prev_len_value);
+                }
+                setLen_(static_cast<std::uint16_t>(getLen_() - count));
+                return;
+            }
+
+            auto next_entry = parseEntry_(next_offset);
+            auto new_next_prev_size = prevLenSize_(first_entry.prev_len_value);
+            bool force_flag = false;
+            if (new_next_prev_size < next_entry.prev_len_size) {
+                new_next_prev_size = next_entry.prev_len_size;
+                force_flag = true;
+            }
+
+            auto diff = static_cast<std::ptrdiff_t>(new_next_prev_size - next_entry.prev_len_size);
+            std::size_t deleted_bytes = next_offset - first_entry.offset - diff;
+            std::size_t move_src = next_offset + next_entry.prev_len_size;
+            std::size_t move_dest = first_entry.offset + new_next_prev_size;
+            std::size_t move_len = entries_.size() - move_src;
+
+            std::memmove(entries_.data() + move_dest, entries_.data() + move_src, move_len);
+            entries_.resize(entries_.size() - deleted_bytes);
+            writePrevLen_(first_entry.offset, first_entry.prev_len_value, force_flag);
+            if (getTail_() == next_offset) {
+                setTail_(first_entry.offset);
+            } else {
+                setTail_(getTail_() - deleted_bytes);
+            }
+
+            setLen_(static_cast<std::uint16_t>(getLen_() - count));
+            cascadeUpdate_(first_entry.offset);
         }
 
         [[nodiscard]] entryView parseEntry_(std::size_t offset) const {

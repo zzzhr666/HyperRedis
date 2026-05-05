@@ -16,10 +16,37 @@ namespace hyper {
         Score max;
         bool min_inclusive = true;
         bool max_inclusive = true;
+
+        ScoreRange(Score min, Score max, bool min_inclusive = true, bool max_inclusive = true)
+            : min(std::move(min)), max(std::move(max)), min_inclusive(min_inclusive), max_inclusive(max_inclusive) {}
     };
+
     template <typename Score, typename Value, typename ValueCompare = std::less<>>
         requires std::totally_ordered<Score>
     class skipList {
+    private:
+        struct skipListNode {
+            struct skipListLevel {
+                skipListNode* forward;
+                std::size_t span;
+                skipListLevel() : forward(nullptr), span(0) {}
+            };
+
+            explicit skipListNode(std::size_t level_count) : levels(level_count), backward(nullptr) {}
+
+            skipListNode(std::size_t level_count, Score score, Value value)
+                : levels(level_count), backward(nullptr), score(std::move(score)), value(std::move(value)) {}
+
+            [[nodiscard]] bool isHeader() const noexcept {
+                return !score.has_value();
+            }
+
+            std::vector<skipListLevel> levels;
+            skipListNode* backward;
+            std::optional<Score> score;
+            std::optional<Value> value;
+        };
+
     public:
         static constexpr std::size_t MaxLevel = 32;
         static constexpr double Probability = 0.25;
@@ -90,21 +117,29 @@ namespace hyper {
         }
 
         std::size_t eraseRangeByScore(const ScoreRange<Score>& range) {
+            return eraseRangeByScore(range, [](const Score&, const Value&) {});
+        }
+
+        template <typename OnErase>
+            requires std::invocable<OnErase&, Score const&, Value const&>
+        std::size_t eraseRangeByScore(const ScoreRange<Score>& range, OnErase&& on_erase) {
             if (!isInScoreRange(range)) {
                 return 0;
             }
             std::array<skipListNode*, MaxLevel> update{};
             skipListNode* current = head_;
             for (int i = level_ - 1; i >= 0; --i) {
-                while (current->levels[i].forward && !greaterThanMin_(current->levels[i].forward->score.value(),range)) {
+                while (current->levels[i].forward && !
+                    greaterThanMin_(current->levels[i].forward->score.value(), range)) {
                     current = current->levels[i].forward;
                 }
                 update[i] = current;
             }
             current = update[0]->levels[0].forward;
             std::size_t res{0};
-            while (current && lessThanMax_(current->score.value(),range)) {
+            while (current && lessThanMax_(current->score.value(), range)) {
                 skipListNode* next = current->levels[0].forward;
+                std::invoke(on_erase, current->score.value(), current->value.value());
                 deleteNode_(current, update);
                 current = next;
                 ++res;
@@ -114,6 +149,12 @@ namespace hyper {
         }
 
         std::size_t eraseRangeByRank(std::size_t start, std::size_t end) {
+            return eraseRangeByRank(start, end, [](const Score&, const Value&) {});
+        }
+
+        template <typename OnErase>
+            requires std::invocable<OnErase&, Score const&, Value const&>
+        std::size_t eraseRangeByRank(std::size_t start, std::size_t end, OnErase&& on_erase) {
             if (start == 0 || start > end || start > length_) {
                 return 0;
             }
@@ -132,13 +173,17 @@ namespace hyper {
             }
 
             current = update[0]->levels[0].forward;
-            for (int i = 0; i < end - start + 1; ++i) {
+            const std::size_t target_count = end - start + 1;
+            std::size_t res{0};
+            while (current && res < target_count) {
                 skipListNode* next = current->levels[0].forward;
+                std::invoke(on_erase, current->score.value(), current->value.value());
                 deleteNode_(current, update);
                 current = next;
+                ++res;
             }
 
-            return end - start + 1;
+            return res;
         }
 
         template <typename V>
@@ -214,14 +259,42 @@ namespace hyper {
             return std::nullopt;
         }
 
+        template <typename Pred>
+            requires std::invocable<Pred&, Score const&, Value const&>
+        void forEachByRank(std::size_t start_rank, std::size_t count, Pred&& pred) const {
+            if (start_rank == 0 || start_rank > length_ || count == 0) {
+                return;
+            }
+
+            const skipListNode* current = getNodeByRank(start_rank);
+            for (std::size_t i = 0; i < count && current != nullptr; ++i) {
+                pred(current->score.value(), current->value.value());
+                current = current->levels[0].forward;
+            }
+        }
+
+        template <typename Pred>
+            requires std::invocable<Pred&, Score const&, Value const&>
+        void forEachReverseByRank(std::size_t start_rank, std::size_t count, Pred&& pred) const {
+            if (start_rank == 0 || start_rank > length_ || count == 0) {
+                return;
+            }
+
+            const skipListNode* current = getNodeByRank(start_rank);
+            for (std::size_t i = 0; i < count && current != nullptr; ++i) {
+                pred(current->score.value(), current->value.value());
+                current = current->backward;
+            }
+        }
+
         bool isInScoreRange(const ScoreRange<Score>& range) const {
             if (isInvalidRange_(range) || empty()) {
                 return false;
             }
-            if (!greaterThanMin_(tail_->score.value(),range)) {
+            if (!greaterThanMin_(tail_->score.value(), range)) {
                 return false;
             }
-            if (!lessThanMax_(head_->levels[0].forward->score.value(),range)) {
+            if (!lessThanMax_(head_->levels[0].forward->score.value(), range)) {
                 return false;
             }
             return true;
@@ -234,12 +307,13 @@ namespace hyper {
             }
             skipListNode* current = head_;
             for (int i = level_ - 1; i >= 0; --i) {
-                while (current->levels[i].forward && !greaterThanMin_(current->levels[i].forward->score.value(),range)) {
+                while (current->levels[i].forward && !
+                    greaterThanMin_(current->levels[i].forward->score.value(), range)) {
                     current = current->levels[i].forward;
                 }
             }
             skipListNode* possible = current->levels[0].forward;
-            if (possible &&lessThanMax_( possible->score.value(),range)) {
+            if (possible && lessThanMax_(possible->score.value(), range)) {
                 return std::make_pair(possible->score.value(), possible->value.value());
             }
 
@@ -254,47 +328,82 @@ namespace hyper {
             }
             skipListNode* current = head_;
             for (int i = level_ - 1; i >= 0; --i) {
-                while (current->levels[i].forward && lessThanMax_(current->levels[i].forward->score.value(),range)) {
+                while (current->levels[i].forward && lessThanMax_(current->levels[i].forward->score.value(), range)) {
                     current = current->levels[i].forward;
                 }
             }
-            if (current != head_ && greaterThanMin_(current->score.value(),range)) {
+            if (current != head_ && greaterThanMin_(current->score.value(), range)) {
                 return std::make_pair(current->score.value(), current->value.value());
             }
 
             return std::nullopt;
         }
 
+        std::size_t getRankOfFirstInRange(const ScoreRange<Score> range) const {
+            if (empty() || !isInScoreRange(range)) {
+                return 0;
+            }
+            std::size_t rank{0};
+            skipListNode* current = head_;
+            for (int i = level_ - 1; i >= 0; --i) {
+                while (current->levels[i].forward && !
+                    greaterThanMin_(current->levels[i].forward->score.value(), range)) {
+                    rank += current->levels[i].span;
+                    current = current->levels[i].forward;
+                }
+            }
+            skipListNode* first = current->levels[0].forward;
+            if (first && lessThanMax_(first->score.value(), range)) {
+                return rank + 1;
+            }
+
+            return 0;
+        }
+
+        std::size_t getRankOfLastInRange(const ScoreRange<Score> range) const {
+            if (empty() || !isInScoreRange(range)) return 0;
+
+            std::size_t rank = 0;
+            skipListNode* current = head_;
+            for (int i = level_ - 1; i >= 0; --i) {
+                while (current->levels[i].forward &&
+                    lessThanMax_(current->levels[i].forward->score.value(), range)) {
+                    rank += current->levels[i].span;
+                    current = current->levels[i].forward;
+                }
+            }
 
 
+            if (current != head_ && greaterThanMin_(current->score.value(), range)) {
+                return rank;
+            }
+            return 0;
+        }
 
+    private:
+        const skipListNode* getNodeByRank(std::size_t rank) const {
+            if (rank == 0 || rank > length_) {
+                return nullptr;
+            }
+
+            std::size_t current_index{0};
+            skipListNode* current = head_;
+            for (int i = level_ - 1; i >= 0; --i) {
+                while (current->levels[i].forward && current_index + current->levels[i].span <= rank) {
+                    current_index += current->levels[i].span;
+                    current = current->levels[i].forward;
+                }
+            }
+
+            return current;
+        }
+
+
+    public:
         ~skipList() {
             clear();
             delete head_;
         }
-
-    private:
-        struct skipListNode {
-            struct skipListLevel {
-                skipListNode* forward;
-                std::size_t span;
-                skipListLevel() : forward(nullptr), span(0) {}
-            };
-
-            explicit skipListNode(std::size_t level_count) : levels(level_count), backward(nullptr) {}
-
-            skipListNode(std::size_t level_count, Score score, Value value)
-                : levels(level_count), backward(nullptr), score(std::move(score)), value(std::move(value)) {}
-
-            [[nodiscard]] bool isHeader() const noexcept {
-                return !score.has_value();
-            }
-
-            std::vector<skipListLevel> levels;
-            skipListNode* backward;
-            std::optional<Score> score;
-            std::optional<Value> value;
-        };
 
     private:
         template <typename V>
@@ -361,15 +470,16 @@ namespace hyper {
             }
         }
 
-        static bool greaterThanMin_(const Score& score,const ScoreRange<Score>& range) {
+        static bool greaterThanMin_(const Score& score, const ScoreRange<Score>& range) {
             return range.min_inclusive ? score >= range.min : score > range.min;
         }
 
         static bool lessThanMax_(const Score& score, const ScoreRange<Score>& range) {
             return range.max_inclusive ? score <= range.max : score < range.max;
         }
+
         static bool inRange_(const Score& score, const ScoreRange<Score>& range) {
-            return greaterThanMin_(score,range) && lessThanMax_(score,range);
+            return greaterThanMin_(score, range) && lessThanMax_(score, range);
         }
 
         static bool isInvalidRange_(const ScoreRange<Score>& range) {

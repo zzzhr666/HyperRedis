@@ -7,59 +7,59 @@ using namespace hyper;
 
 TEST(ObjectTest, StringToLongEncoding) {
     // 正常整数
-    auto obj1 = RedisObject::createStringObject("123");
+    auto obj1 = RedisObject::createSharedStringObject("123");
     EXPECT_EQ(obj1->getType(), ObjectType::String);
     EXPECT_EQ(obj1->getEncoding(), ObjectEncoding::Int);
 
     // 负数
-    auto obj2 = RedisObject::createStringObject("-456");
+    auto obj2 = RedisObject::createSharedStringObject("-456");
     EXPECT_EQ(obj2->getEncoding(), ObjectEncoding::Int);
 }
 
 TEST(ObjectTest, StringNormalization) {
     // 前导零：不应转为整数
-    auto obj1 = RedisObject::createStringObject("0123");
+    auto obj1 = RedisObject::createSharedStringObject("0123");
     EXPECT_EQ(obj1->getEncoding(), ObjectEncoding::Raw);
 
     // 负号加前导零：不应转为整数
-    auto obj2 = RedisObject::createStringObject("-01");
+    auto obj2 = RedisObject::createSharedStringObject("-01");
     EXPECT_EQ(obj2->getEncoding(), ObjectEncoding::Raw);
 
     // 只有 "0"：应该转为整数
-    auto obj3 = RedisObject::createStringObject("0");
+    auto obj3 = RedisObject::createSharedStringObject("0");
     EXPECT_EQ(obj3->getEncoding(), ObjectEncoding::Int);
 }
 
 TEST(ObjectTest, RawString) {
     // 非数字
-    auto obj1 = RedisObject::createStringObject("hello");
+    auto obj1 = RedisObject::createSharedStringObject("hello");
     EXPECT_EQ(obj1->getEncoding(), ObjectEncoding::Raw);
 
     // 包含空格的数字
-    auto obj2 = RedisObject::createStringObject(" 123 ");
+    auto obj2 = RedisObject::createSharedStringObject(" 123 ");
     EXPECT_EQ(obj2->getEncoding(), ObjectEncoding::Raw);
 }
 
 TEST(ObjectTest, LongObject) {
-    auto obj = RedisObject::createLongObject(100);
+    auto obj = RedisObject::createSharedLongObject(100);
     EXPECT_EQ(obj->getEncoding(), ObjectEncoding::Int);
 }
 
 TEST(ObjectTest, Accessors) {
     // 测试 Int 编码的访问
-    auto obj1 = RedisObject::createStringObject("123");
+    auto obj1 = RedisObject::createSharedStringObject("123");
     EXPECT_EQ(obj1->getEncoding(), ObjectEncoding::Int);
     EXPECT_EQ(obj1->asString(), "123");
 
     // 测试 Raw 编码的访问
-    auto obj2 = RedisObject::createStringObject("hello");
+    auto obj2 = RedisObject::createSharedStringObject("hello");
     EXPECT_EQ(obj2->getEncoding(), ObjectEncoding::Raw);
     EXPECT_EQ(obj2->asString(), "hello");
 }
 
 TEST(ObjectTest, AppendLogic) {
     // 测试从 Int 转换到 Raw 的追加
-    auto obj = RedisObject::createStringObject("100");
+    auto obj = RedisObject::createSharedStringObject("100");
     EXPECT_EQ(obj->getEncoding(), ObjectEncoding::Int);
     
     obj->append("50"); 
@@ -71,27 +71,25 @@ TEST(ObjectTest, AppendLogic) {
     EXPECT_EQ(obj->asString(), "10050!");
 }
 
-TEST(ObjectTest, HashRecursiveStorage) {
-    // 1. 创建一个 Hash 对象
-    auto hashObj = RedisObject::createHashObject();
-    
-    // 2. 创建两个 String 对象作为 Value
-    auto val1 = std::shared_ptr<RedisObject>(RedisObject::createStringObject("val1"));
-    auto val2 = std::shared_ptr<RedisObject>(RedisObject::createLongObject(100));
-    
-    // 3. 存入 Hash
+TEST(ObjectTest, HashStoresStringValuesInZipList) {
+    auto hashObj = RedisObject::createSharedHashObject();
+    EXPECT_EQ(hashObj->getType(), ObjectType::Hash);
+    EXPECT_EQ(hashObj->getEncoding(), ObjectEncoding::ZipList);
+
+    auto val1 = RedisObject::createSharedStringObject("val1");
+    auto val2 = RedisObject::createSharedLongObject(100);
+
     EXPECT_TRUE(hashObj->hashSet("field1", val1));
     EXPECT_TRUE(hashObj->hashSet("field2", val2));
     EXPECT_EQ(hashObj->hashSize(), 2);
     EXPECT_TRUE(hashObj->hashContains("field1"));
     EXPECT_TRUE(hashObj->hashContains("field2"));
     EXPECT_FALSE(hashObj->hashContains("missing"));
-    
-    // 4. 读取并验证
+
     auto res1 = hashObj->hashGet("field1");
     ASSERT_NE(res1, nullptr);
     EXPECT_EQ(res1->asString(), "val1");
-    
+
     auto res2 = hashObj->hashGet("field2");
     ASSERT_NE(res2, nullptr);
     EXPECT_EQ(res2->getEncoding(), ObjectEncoding::Int);
@@ -99,12 +97,12 @@ TEST(ObjectTest, HashRecursiveStorage) {
 }
 
 TEST(ObjectTest, HashSetUpdatesExistingField) {
-    auto hashObj = RedisObject::createHashObject();
+    auto hashObj = RedisObject::createSharedHashObject();
 
-    EXPECT_TRUE(hashObj->hashSet("field", RedisObject::createStringObject("old")));
+    EXPECT_TRUE(hashObj->hashSet("field", RedisObject::createSharedStringObject("old")));
     EXPECT_EQ(hashObj->hashSize(), 1);
 
-    EXPECT_FALSE(hashObj->hashSet("field", RedisObject::createStringObject("new")));
+    EXPECT_FALSE(hashObj->hashSet("field", RedisObject::createSharedStringObject("new")));
     EXPECT_EQ(hashObj->hashSize(), 1);
 
     auto value = hashObj->hashGet("field");
@@ -113,10 +111,10 @@ TEST(ObjectTest, HashSetUpdatesExistingField) {
 }
 
 TEST(ObjectTest, HashRemoveDeletesExistingField) {
-    auto hashObj = RedisObject::createHashObject();
+    auto hashObj = RedisObject::createSharedHashObject();
 
-    EXPECT_TRUE(hashObj->hashSet("field1", RedisObject::createStringObject("value1")));
-    EXPECT_TRUE(hashObj->hashSet("field2", RedisObject::createStringObject("value2")));
+    EXPECT_TRUE(hashObj->hashSet("field1", RedisObject::createSharedStringObject("value1")));
+    EXPECT_TRUE(hashObj->hashSet("field2", RedisObject::createSharedStringObject("value2")));
     EXPECT_EQ(hashObj->hashSize(), 2);
 
     EXPECT_TRUE(hashObj->hashRemove("field1"));
@@ -131,8 +129,8 @@ TEST(ObjectTest, HashRemoveDeletesExistingField) {
 }
 
 TEST(ObjectTest, HashContainsWorksThroughConstObject) {
-    auto hashObj = RedisObject::createHashObject();
-    EXPECT_TRUE(hashObj->hashSet("field", RedisObject::createStringObject("value")));
+    auto hashObj = RedisObject::createSharedHashObject();
+    EXPECT_TRUE(hashObj->hashSet("field", RedisObject::createSharedStringObject("value")));
 
     const auto& const_hash = *hashObj;
     EXPECT_TRUE(const_hash.hashContains("field"));
@@ -140,10 +138,10 @@ TEST(ObjectTest, HashContainsWorksThroughConstObject) {
 }
 
 TEST(ObjectTest, HashForEachVisitsAllFieldsAndValues) {
-    auto hashObj = RedisObject::createHashObject();
+    auto hashObj = RedisObject::createSharedHashObject();
 
-    EXPECT_TRUE(hashObj->hashSet("field1", RedisObject::createStringObject("value1")));
-    EXPECT_TRUE(hashObj->hashSet("field2", RedisObject::createLongObject(100)));
+    EXPECT_TRUE(hashObj->hashSet("field1", RedisObject::createSharedStringObject("value1")));
+    EXPECT_TRUE(hashObj->hashSet("field2", RedisObject::createSharedLongObject(100)));
 
     std::map<std::string, std::string> entries;
     std::function<void(std::string_view, const std::shared_ptr<RedisObject>&)> collect =
@@ -160,13 +158,82 @@ TEST(ObjectTest, HashForEachVisitsAllFieldsAndValues) {
                        }));
 }
 
+TEST(ObjectTest, HashZipListLookupIgnoresMatchingValueEntries) {
+    auto hashObj = RedisObject::createSharedHashObject();
+
+    EXPECT_TRUE(hashObj->hashSet("field1", RedisObject::createSharedStringObject("field2")));
+    EXPECT_TRUE(hashObj->hashSet("field2", RedisObject::createSharedStringObject("value2")));
+    EXPECT_EQ(hashObj->hashSize(), 2);
+
+    EXPECT_TRUE(hashObj->hashContains("field2"));
+    auto value = hashObj->hashGet("field2");
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->asString(), "value2");
+
+    EXPECT_FALSE(hashObj->hashRemove("value2"));
+    EXPECT_TRUE(hashObj->hashRemove("field2"));
+    EXPECT_EQ(hashObj->hashSize(), 1);
+    EXPECT_TRUE(hashObj->hashContains("field1"));
+    EXPECT_FALSE(hashObj->hashContains("field2"));
+}
+
+TEST(ObjectTest, HashUpgradesToHashTableAfterZipListEntryThreshold) {
+    auto hashObj = RedisObject::createSharedHashObject();
+
+    for (std::size_t i = 0; i < RedisObject::HashZipListMaxEntries; ++i) {
+        EXPECT_TRUE(hashObj->hashSet("field" + std::to_string(i),
+                                     RedisObject::createSharedStringObject("value" + std::to_string(i))));
+    }
+
+    EXPECT_EQ(hashObj->getEncoding(), ObjectEncoding::ZipList);
+    EXPECT_EQ(hashObj->hashSize(), RedisObject::HashZipListMaxEntries);
+
+    EXPECT_TRUE(hashObj->hashSet("field" + std::to_string(RedisObject::HashZipListMaxEntries),
+                                 RedisObject::createSharedStringObject("value-over-threshold")));
+    EXPECT_EQ(hashObj->getEncoding(), ObjectEncoding::HashTable);
+    EXPECT_EQ(hashObj->hashSize(), RedisObject::HashZipListMaxEntries + 1);
+
+    auto first = hashObj->hashGet("field0");
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->asString(), "value0");
+
+    auto last = hashObj->hashGet("field" + std::to_string(RedisObject::HashZipListMaxEntries));
+    ASSERT_NE(last, nullptr);
+    EXPECT_EQ(last->asString(), "value-over-threshold");
+
+    EXPECT_FALSE(hashObj->hashSet("field0", RedisObject::createSharedStringObject("updated")));
+    EXPECT_EQ(hashObj->hashSize(), RedisObject::HashZipListMaxEntries + 1);
+    EXPECT_EQ(hashObj->hashGet("field0")->asString(), "updated");
+}
+
+TEST(ObjectTest, HashUpgradesToHashTableForLargeFieldOrValue) {
+    auto hashObj = RedisObject::createSharedHashObject();
+    std::string large_value(RedisObject::ZipListMaxValue + 1, 'x');
+
+    EXPECT_TRUE(hashObj->hashSet("field", RedisObject::createSharedStringObject(large_value)));
+    EXPECT_EQ(hashObj->getEncoding(), ObjectEncoding::HashTable);
+    EXPECT_EQ(hashObj->hashSize(), 1);
+
+    auto value = hashObj->hashGet("field");
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->asString(), large_value);
+
+    auto hashObj2 = RedisObject::createSharedHashObject();
+    std::string large_field(RedisObject::ZipListMaxValue + 1, 'f');
+
+    EXPECT_TRUE(hashObj2->hashSet(large_field, RedisObject::createSharedStringObject("value")));
+    EXPECT_EQ(hashObj2->getEncoding(), ObjectEncoding::HashTable);
+    EXPECT_EQ(hashObj2->hashSize(), 1);
+    EXPECT_EQ(hashObj2->hashGet(large_field)->asString(), "value");
+}
+
 TEST(ObjectTest, ListBasicOperations) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::ZipList);
 
     // 测试 LPUSH 和 RPOP
-    listObj->listLeftPush(RedisObject::createStringObject("first"));
-    listObj->listLeftPush(RedisObject::createStringObject("second"));
+    listObj->listLeftPush(RedisObject::createSharedStringObject("first"));
+    listObj->listLeftPush(RedisObject::createSharedStringObject("second"));
     
     // 结构应该是: second -> first
     auto res1 = listObj->listRightPop();
@@ -181,14 +248,55 @@ TEST(ObjectTest, ListBasicOperations) {
     EXPECT_EQ(listObj->listLeftPop(), nullptr);
 }
 
+TEST(ObjectTest, ListSetUpdatesZipListByIndex) {
+    auto listObj = RedisObject::createSharedListObject();
+
+    listObj->listRightPush(RedisObject::createSharedStringObject("a"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("b"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("c"));
+
+    EXPECT_TRUE(listObj->listSet(1, RedisObject::createSharedStringObject("middle")));
+    EXPECT_EQ(listObj->listLen(), 3);
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "a");
+    EXPECT_EQ(listObj->listIndex(1)->asString(), "middle");
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "c");
+
+    EXPECT_TRUE(listObj->listSet(-1, RedisObject::createSharedLongObject(42)));
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "42");
+
+    EXPECT_FALSE(listObj->listSet(3, RedisObject::createSharedStringObject("out")));
+    EXPECT_FALSE(listObj->listSet(-4, RedisObject::createSharedStringObject("out")));
+    EXPECT_EQ(listObj->listLen(), 3);
+    EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::ZipList);
+}
+
+TEST(ObjectTest, ListSetTriggersLinkedListUpgradeAndKeepsOrder) {
+    auto listObj = RedisObject::createSharedListObject();
+    std::string large_value(RedisObject::ZipListMaxValue + 1, 'x');
+
+    listObj->listRightPush(RedisObject::createSharedStringObject("head"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("target"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("tail"));
+
+    EXPECT_TRUE(listObj->listSet(1, RedisObject::createSharedStringObject(large_value)));
+    EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
+    EXPECT_EQ(listObj->listLen(), 3);
+    EXPECT_EQ(listObj->listIndex(0)->asString(), "head");
+    EXPECT_EQ(listObj->listIndex(1)->asString(), large_value);
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "tail");
+
+    EXPECT_TRUE(listObj->listSet(-1, RedisObject::createSharedStringObject("new-tail")));
+    EXPECT_EQ(listObj->listIndex(2)->asString(), "new-tail");
+}
+
 TEST(ObjectTest, ListInsert) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     // 初始: ["a", "c"]
-    listObj->listRightPush(RedisObject::createStringObject("a"));
-    listObj->listRightPush(RedisObject::createStringObject("c"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("a"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("c"));
 
     // 1. ZipList 插入 (Before)
-    auto res1 = listObj->listInsert("c", RedisObject::createStringObject("b"), true);
+    auto res1 = listObj->listInsert("c", RedisObject::createSharedStringObject("b"), true);
     ASSERT_TRUE(res1.has_value());
     EXPECT_EQ(*res1, 3);
     EXPECT_EQ(listObj->listLen(), 3);
@@ -196,7 +304,7 @@ TEST(ObjectTest, ListInsert) {
     EXPECT_EQ(listObj->listIndex(1)->asString(), "b");
 
     // 2. ZipList 插入 (After)
-    auto res2 = listObj->listInsert("c", RedisObject::createStringObject("d"), false);
+    auto res2 = listObj->listInsert("c", RedisObject::createSharedStringObject("d"), false);
     ASSERT_TRUE(res2.has_value());
     EXPECT_EQ(*res2, 4);
     EXPECT_EQ(listObj->listLen(), 4);
@@ -204,28 +312,28 @@ TEST(ObjectTest, ListInsert) {
     EXPECT_EQ(listObj->listIndex(3)->asString(), "d");
 
     // 3. Pivot 不存在
-    EXPECT_FALSE(listObj->listInsert("e", RedisObject::createStringObject("x"), true).has_value());
+    EXPECT_FALSE(listObj->listInsert("e", RedisObject::createSharedStringObject("x"), true).has_value());
 
     // 4. LinkedList 编码下测试 (插入足够多元素触发转换)
     for (int i = 0; i < 20; ++i) {
-        listObj->listRightPush(RedisObject::createStringObject(std::to_string(i)));
+        listObj->listRightPush(RedisObject::createSharedStringObject(std::to_string(i)));
     }
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
 
     // 在 LinkedList 插入
-    auto res3 = listObj->listInsert("0", RedisObject::createStringObject("before_0"), true);
+    auto res3 = listObj->listInsert("0", RedisObject::createSharedStringObject("before_0"), true);
     ASSERT_TRUE(res3.has_value());
     EXPECT_EQ(*res3, listObj->listLen());
 }
 
 TEST(ObjectTest, ListRemove) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     // 初始: ["a", "b", "a", "c", "a"]
-    listObj->listRightPush(RedisObject::createStringObject("a"));
-    listObj->listRightPush(RedisObject::createStringObject("b"));
-    listObj->listRightPush(RedisObject::createStringObject("a"));
-    listObj->listRightPush(RedisObject::createStringObject("c"));
-    listObj->listRightPush(RedisObject::createStringObject("a"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("a"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("b"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("a"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("c"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("a"));
 
     // 1. 删除前 2 个 "a" (from_front)
     EXPECT_EQ(listObj->listRemove(2, "a"), 2);
@@ -245,8 +353,8 @@ TEST(ObjectTest, ListRemove) {
     EXPECT_EQ(listObj->listIndex(1)->asString(), "c");
 
     // 3. 测试反向删除 (from_back)
-    listObj->listRightPush(RedisObject::createStringObject("b"));
-    listObj->listRightPush(RedisObject::createStringObject("b"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("b"));
+    listObj->listRightPush(RedisObject::createSharedStringObject("b"));
     // 现在: ["b", "c", "b", "b"]
     
     // 删除最后 2 个 "b"
@@ -258,7 +366,7 @@ TEST(ObjectTest, ListRemove) {
 
     // 4. LinkedList 下的删除测试
     for (int i = 0; i < 20; ++i) {
-        listObj->listRightPush(RedisObject::createStringObject("x"));
+        listObj->listRightPush(RedisObject::createSharedStringObject("x"));
     }
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
     EXPECT_EQ(listObj->listRemove(10, "x"), 10);
@@ -266,11 +374,11 @@ TEST(ObjectTest, ListRemove) {
 }
 
 TEST(ObjectTest, ListMixedTypeAndEncoding) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     
     // 存入字符串和数字
-    listObj->listRightPush(RedisObject::createStringObject("hello"));
-    listObj->listRightPush(RedisObject::createLongObject(100));
+    listObj->listRightPush(RedisObject::createSharedStringObject("hello"));
+    listObj->listRightPush(RedisObject::createSharedLongObject(100));
 
     // 弹出验证：数字应该被正确重新对象化为 Int 编码
     auto res1 = listObj->listLeftPop(); // "hello"
@@ -282,12 +390,12 @@ TEST(ObjectTest, ListMixedTypeAndEncoding) {
 }
 
 TEST(ObjectTest, ListAutomaticUpgrade) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::ZipList);
 
     // 连续 Push 超过阈值 (我们在头文件设定的 ZipListMaxEntries 是 16)
     for (int i = 0; i < 20; ++i) {
-        listObj->listRightPush(RedisObject::createLongObject(i));
+        listObj->listRightPush(RedisObject::createSharedLongObject(i));
     }
 
     // 验证编码是否已经自动升级为 LinkedList
@@ -304,11 +412,11 @@ TEST(ObjectTest, ListAutomaticUpgrade) {
 }
 
 TEST(ObjectTest, ListLargeValueTriggersLinkedListUpgrade) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     std::string large_value(RedisObject::ZipListMaxValue + 1, 'x');
 
-    listObj->listRightPush(RedisObject::createStringObject("small"));
-    listObj->listRightPush(RedisObject::createStringObject(large_value));
+    listObj->listRightPush(RedisObject::createSharedStringObject("small"));
+    listObj->listRightPush(RedisObject::createSharedStringObject(large_value));
 
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
 
@@ -324,7 +432,7 @@ TEST(ObjectTest, ListLargeValueTriggersLinkedListUpgrade) {
 }
 
 TEST(ObjectTest, SetStartsAsIntSet) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_EQ(setObj->getType(), ObjectType::Set);
     EXPECT_EQ(setObj->getEncoding(), ObjectEncoding::IntSet);
@@ -332,7 +440,7 @@ TEST(ObjectTest, SetStartsAsIntSet) {
 }
 
 TEST(ObjectTest, SetStoresIntegerMembersInIntSet) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_TRUE(setObj->setAdd("1"));
     EXPECT_EQ(setObj->setSize(), 1);
@@ -350,7 +458,7 @@ TEST(ObjectTest, SetStoresIntegerMembersInIntSet) {
 }
 
 TEST(ObjectTest, SetUpgradesToHashTableForStringMember) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_TRUE(setObj->setAdd("1"));
     EXPECT_TRUE(setObj->setAdd("hello"));
@@ -364,7 +472,7 @@ TEST(ObjectTest, SetUpgradesToHashTableForStringMember) {
 }
 
 TEST(ObjectTest, SetUpgradesToHashTableAfterIntSetThreshold) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     for (std::size_t i = 0; i < RedisObject::SetMaxIntSetEntries; ++i) {
         EXPECT_TRUE(setObj->setAdd(std::to_string(i)));
@@ -379,7 +487,7 @@ TEST(ObjectTest, SetUpgradesToHashTableAfterIntSetThreshold) {
 }
 
 TEST(ObjectTest, SetRemoveFromIntSet) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_TRUE(setObj->setAdd("1"));
     EXPECT_TRUE(setObj->setAdd("2"));
@@ -399,7 +507,7 @@ TEST(ObjectTest, SetRemoveFromIntSet) {
 }
 
 TEST(ObjectTest, SetRemoveFromHashTableAfterUpgrade) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_TRUE(setObj->setAdd("1"));
     EXPECT_TRUE(setObj->setAdd("hello"));
@@ -418,7 +526,7 @@ TEST(ObjectTest, SetRemoveFromHashTableAfterUpgrade) {
 }
 
 TEST(ObjectTest, SetForEachVisitsIntSetMembers) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_TRUE(setObj->setAdd("1"));
     EXPECT_TRUE(setObj->setAdd("-2"));
@@ -435,7 +543,7 @@ TEST(ObjectTest, SetForEachVisitsIntSetMembers) {
 }
 
 TEST(ObjectTest, SetForEachVisitsHashTableMembersAfterUpgrade) {
-    auto setObj = RedisObject::createSetObject();
+    auto setObj = RedisObject::createSharedSetObject();
 
     EXPECT_TRUE(setObj->setAdd("1"));
     EXPECT_TRUE(setObj->setAdd("hello"));
@@ -454,37 +562,37 @@ TEST(ObjectTest, SetForEachVisitsHashTableMembersAfterUpgrade) {
 
 TEST(ObjectTest, StringAdvancedCommands) {
     // 1. stringLen
-    auto obj1 = RedisObject::createStringObject("hello");
+    auto obj1 = RedisObject::createSharedStringObject("hello");
     EXPECT_EQ(obj1->stringLen(), 5);
-    auto obj2 = RedisObject::createLongObject(100);
+    auto obj2 = RedisObject::createSharedLongObject(100);
     EXPECT_EQ(obj2->stringLen(), 3);
 
     // 2. stringIncrBy
-    auto obj3 = RedisObject::createStringObject("10");
+    auto obj3 = RedisObject::createSharedStringObject("10");
     auto res3 = obj3->stringIncrBy(5);
     ASSERT_TRUE(res3.has_value());
     EXPECT_EQ(*res3, 15);
     EXPECT_EQ(obj3->getEncoding(), ObjectEncoding::Int);
 
-    auto obj4 = RedisObject::createStringObject("not-a-number");
+    auto obj4 = RedisObject::createSharedStringObject("not-a-number");
     EXPECT_FALSE(obj4->stringIncrBy(5).has_value());
 
     // 3. stringIncrByFloat
-    auto obj5 = RedisObject::createStringObject("10.5");
+    auto obj5 = RedisObject::createSharedStringObject("10.5");
     auto res5 = obj5->stringIncrByFloat(0.5);
     ASSERT_TRUE(res5.has_value());
     EXPECT_DOUBLE_EQ(*res5, 11.0);
     EXPECT_EQ(obj5->getEncoding(), ObjectEncoding::Raw);
 
     // 4. stringGetRange
-    auto obj6 = RedisObject::createStringObject("Hello World");
+    auto obj6 = RedisObject::createSharedStringObject("Hello World");
     EXPECT_EQ(obj6->stringGetRange(0, 4), "Hello");
     EXPECT_EQ(obj6->stringGetRange(-5, -1), "World");
     EXPECT_EQ(obj6->stringGetRange(0, -1), "Hello World");
     EXPECT_EQ(obj6->stringGetRange(100, 200), "");
 
     // 5. stringSetRange
-    auto obj7 = RedisObject::createStringObject("hello");
+    auto obj7 = RedisObject::createSharedStringObject("hello");
     obj7->stringSetRange(1, "i");
     EXPECT_EQ(obj7->asString(), "hillo");
     
@@ -499,10 +607,10 @@ TEST(ObjectTest, StringAdvancedCommands) {
 
 
 TEST(ObjectTest, ListTrim) {
-    auto listObj = RedisObject::createListObject();
+    auto listObj = RedisObject::createSharedListObject();
     // 初始: ["0", "1", "2", "3", "4"]
     for (int i = 0; i < 5; ++i) {
-        listObj->listRightPush(RedisObject::createStringObject(std::to_string(i)));
+        listObj->listRightPush(RedisObject::createSharedStringObject(std::to_string(i)));
     }
 
     // 1. 正常裁剪中间部分: LTRIM 1 3 -> ["1", "2", "3"]
@@ -524,7 +632,7 @@ TEST(ObjectTest, ListTrim) {
 
     // 4. LinkedList 编码下的裁剪
     for (int i = 0; i < 20; ++i) {
-        listObj->listRightPush(RedisObject::createLongObject(i));
+        listObj->listRightPush(RedisObject::createSharedLongObject(i));
     }
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
     
@@ -532,4 +640,117 @@ TEST(ObjectTest, ListTrim) {
     EXPECT_EQ(listObj->listLen(), 10);
     EXPECT_EQ(listObj->listIndex(0)->asString(), "0");
     EXPECT_EQ(listObj->listIndex(9)->asString(), "9");
+}
+
+TEST(ObjectTest, SetRandomMember) {
+    // 1. Test IntSet
+    auto setObj = RedisObject::createSharedSetObject();
+    for (int i = 0; i < 5; ++i) {
+        setObj->setAdd(std::to_string(i));
+    }
+    EXPECT_EQ(setObj->getEncoding(), ObjectEncoding::IntSet);
+    
+    auto rand = setObj->setRandomMember();
+    ASSERT_NE(rand, nullptr);
+    EXPECT_TRUE(setObj->setContains(rand->asString()));
+    EXPECT_EQ(setObj->setSize(), 5); // Size should not change
+
+    // 2. Test HashTable
+    setObj->setAdd("hello"); // Trigger upgrade
+    EXPECT_EQ(setObj->getEncoding(), ObjectEncoding::HashTable);
+    
+    rand = setObj->setRandomMember();
+    ASSERT_NE(rand, nullptr);
+    EXPECT_TRUE(setObj->setContains(rand->asString()));
+    EXPECT_EQ(setObj->setSize(), 6);
+}
+
+TEST(ObjectTest, SetPop) {
+    // 1. Test IntSet
+    auto setObj = RedisObject::createSharedSetObject();
+    std::set<std::string> members = {"1", "2", "3"};
+    for (const auto& m : members) {
+        setObj->setAdd(m);
+    }
+    
+    auto popped = setObj->setPop();
+    ASSERT_NE(popped, nullptr);
+    EXPECT_TRUE(members.count(popped->asString()));
+    EXPECT_FALSE(setObj->setContains(popped->asString()));
+    EXPECT_EQ(setObj->setSize(), 2);
+
+    // 2. Test HashTable
+    setObj->setAdd("extra");
+    setObj->setAdd("world"); // Force more members
+    setObj->setAdd("trigger_upgrade"); // Just in case, though it might already be HashTable if mixed
+    
+    // Ensure it's HashTable
+    if (setObj->getEncoding() == ObjectEncoding::IntSet) {
+        setObj->setAdd("force_hash");
+    }
+    
+    size_t initial_size = setObj->setSize();
+    popped = setObj->setPop();
+    ASSERT_NE(popped, nullptr);
+    EXPECT_FALSE(setObj->setContains(popped->asString()));
+    EXPECT_EQ(setObj->setSize(), initial_size - 1);
+}
+
+TEST(ObjectTest, ZSetAdvancedOps) {
+    auto zsetObj = RedisObject::createSharedZSetObject();
+    
+    // Initial data: a:10, b:20, c:30
+    zsetObj->zSetAdd("a", 10.0);
+    zsetObj->zSetAdd("b", 20.0);
+    zsetObj->zSetAdd("c", 30.0);
+    
+    // 1. ZREVRANK
+    EXPECT_EQ(zsetObj->zSetRank("a"), 0);
+    EXPECT_EQ(zsetObj->zSetRevRank("a"), 2);
+    EXPECT_EQ(zsetObj->zSetRevRank("c"), 0);
+    EXPECT_FALSE(zsetObj->zSetRevRank("nonexistent").has_value());
+
+    // 2. ZCOUNT
+    EXPECT_EQ(zsetObj->zSetCount(15.0, 35.0), 2); // b, c
+    EXPECT_EQ(zsetObj->zSetCount(5.0, 40.0), 3);
+    EXPECT_EQ(zsetObj->zSetCount(35.0, 40.0), 0);
+
+    // 3. ZRANGE
+    auto range = zsetObj->zSetRange(0, 1); // a, b
+    ASSERT_EQ(range.size(), 2);
+    EXPECT_EQ(range[0].first, "a");
+    EXPECT_DOUBLE_EQ(range[0].second, 10.0);
+    EXPECT_EQ(range[1].first, "b");
+    EXPECT_DOUBLE_EQ(range[1].second, 20.0);
+
+    // 4. ZREVRANGE
+    auto revRange = zsetObj->zSetRevRange(0, 1); // c, b
+    ASSERT_EQ(revRange.size(), 2);
+    EXPECT_EQ(revRange[0].first, "c");
+    EXPECT_DOUBLE_EQ(revRange[0].second, 30.0);
+    EXPECT_EQ(revRange[1].first, "b");
+    EXPECT_DOUBLE_EQ(revRange[1].second, 20.0);
+}
+
+TEST(ObjectTest, ZSetSkipListUpgradeAndOps) {
+    auto zsetObj = RedisObject::createSharedZSetObject();
+    // ZSet threshold is ZSetZipListMaxEntries=16
+    for (int i = 0; i < 20; ++i) {
+        zsetObj->zSetAdd("m" + std::to_string(i), i * 10.0);
+    }
+    EXPECT_EQ(zsetObj->getEncoding(), ObjectEncoding::SkipList);
+
+    // Test ZCOUNT on SkipList
+    EXPECT_EQ(zsetObj->zSetCount(50.0, 150.0), 11); // 50, 60, ..., 150 (m5 to m15)
+
+    // Test ZREVRANK on SkipList
+    EXPECT_EQ(zsetObj->zSetRevRank("m19"), 0);
+    EXPECT_EQ(zsetObj->zSetRevRank("m0"), 19);
+
+    // Test ZREVRANGE on SkipList
+    auto revRange = zsetObj->zSetRevRange(0, 2); // m19, m18, m17
+    ASSERT_EQ(revRange.size(), 3);
+    EXPECT_EQ(revRange[0].first, "m19");
+    EXPECT_EQ(revRange[1].first, "m18");
+    EXPECT_EQ(revRange[2].first, "m17");
 }

@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <random>
 
 namespace hyper {
     struct transparentStringHash {
@@ -28,7 +29,7 @@ namespace hyper {
         }
     };
 
-    template<typename K, typename V, typename Hash = std::hash<K>, typename KeyEqual = std::equal_to<K>>
+    template <typename K, typename V, typename Hash = std::hash<K>, typename KeyEqual = std::equal_to<K>>
     class dict {
     public:
         explicit dict(std::size_t size = 4)
@@ -61,8 +62,8 @@ namespace hyper {
         }
 
         void clear() {
-            for (auto& ht: hash_tables_) {
-                for (auto& entry: ht.table) {
+            for (auto& ht : hash_tables_) {
+                for (auto& entry : ht.table) {
                     auto current = entry;
                     while (current) {
                         auto next = current->next;
@@ -73,7 +74,7 @@ namespace hyper {
                 }
                 ht.used = 0;
             }
-
+            resetTable_(hash_tables_[0], MinBucketSize);
             hash_tables_[1].table.clear();
             hash_tables_[1].mask = 0;
             rehash_index_ = -1;
@@ -98,11 +99,34 @@ namespace hyper {
             return eraseImpl_(k);
         }
 
-        template<typename Q>
+        const K* getRandomKey() const {
+            if (empty()) {
+                return nullptr;
+            }
+            const dictHt* ht = nullptr;
+            if (isRehashing_()) {
+                if (hash_tables_[0].used == 0) {
+                    ht = &hash_tables_[1];
+                } else if (hash_tables_[1].used == 0) {
+                    ht = &hash_tables_[0];
+                } else {
+                    std::uniform_int_distribution<std::size_t> table_dist(0, size() - 1);
+                    ht = table_dist(randomEngine_()) < hash_tables_[0].used
+                        ? &hash_tables_[0]
+                        : &hash_tables_[1];
+                }
+            } else {
+                ht = &hash_tables_[0];
+            }
+            const dictEntry* entry = randomEntryFromTable_(*ht);
+            return entry == nullptr ? nullptr : &entry->key;
+        }
+
+        template <typename Q>
             requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
-                      std::invocable<const Hash&, const Q&> &&
-                      std::predicate<const KeyEqual&, const Q&, const K&> &&
-                      std::predicate<const KeyEqual&, const K&, const Q&>)
+                std::invocable<const Hash&, const Q&> &&
+                std::predicate<const KeyEqual&, const Q&, const K&> &&
+                std::predicate<const KeyEqual&, const K&, const Q&>)
         bool erase(const Q& k) {
             return eraseImpl_(k);
         }
@@ -111,11 +135,11 @@ namespace hyper {
             return find_(k) != nullptr;
         }
 
-        template<typename Q>
+        template <typename Q>
             requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
-                      std::invocable<const Hash&, const Q&> &&
-                      std::predicate<const KeyEqual&, const Q&, const K&> &&
-                      std::predicate<const KeyEqual&, const K&, const Q&>)
+                std::invocable<const Hash&, const Q&> &&
+                std::predicate<const KeyEqual&, const Q&, const K&> &&
+                std::predicate<const KeyEqual&, const K&, const Q&>)
         bool contains(const Q& k) const {
             return find_(k) != nullptr;
         }
@@ -128,11 +152,11 @@ namespace hyper {
             return nullptr;
         }
 
-        template<typename Q>
+        template <typename Q>
             requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
-                      std::invocable<const Hash&, const Q&> &&
-                      std::predicate<const KeyEqual&, const Q&, const K&> &&
-                      std::predicate<const KeyEqual&, const K&, const Q&>)
+                std::invocable<const Hash&, const Q&> &&
+                std::predicate<const KeyEqual&, const Q&, const K&> &&
+                std::predicate<const KeyEqual&, const K&, const Q&>)
         V* get(const Q& k) noexcept {
             if (dictEntry* res = find_(k)) {
                 return &res->value;
@@ -147,11 +171,11 @@ namespace hyper {
             return nullptr;
         }
 
-        template<typename Q>
+        template <typename Q>
             requires (!std::same_as<std::remove_cvref_t<Q>, K> &&
-                      std::invocable<const Hash&, const Q&> &&
-                      std::predicate<const KeyEqual&, const Q&, const K&> &&
-                      std::predicate<const KeyEqual&, const K&, const Q&>)
+                std::invocable<const Hash&, const Q&> &&
+                std::predicate<const KeyEqual&, const Q&, const K&> &&
+                std::predicate<const KeyEqual&, const K&, const Q&>)
         const V* get(const Q& k) const noexcept {
             if (const dictEntry* res = find_(k)) {
                 return &res->value;
@@ -176,21 +200,21 @@ namespace hyper {
             return true;
         }
 
-        template<typename FUNCTION>
-            requires std::invocable<FUNCTION,const K&,const V&>
+        template <typename FUNCTION>
+            requires std::invocable<FUNCTION, const K&, const V&>
         void forEach(FUNCTION&& f) const {
-            forEachInTable_(hash_tables_[0],std::forward<FUNCTION>(f));
+            forEachInTable_(hash_tables_[0], std::forward<FUNCTION>(f));
             if (isRehashing_()) {
-                forEachInTable_(hash_tables_[1],std::forward<FUNCTION>(f));
+                forEachInTable_(hash_tables_[1], std::forward<FUNCTION>(f));
             }
         }
 
-        template<typename FUNCTION>
-            requires std::invocable<FUNCTION,const K&,V&>
+        template <typename FUNCTION>
+            requires std::invocable<FUNCTION, const K&, V&>
         void forEach(FUNCTION&& f) {
-            forEachInTable_(hash_tables_[0],std::forward<FUNCTION>(f));
+            forEachInTable_(hash_tables_[0], std::forward<FUNCTION>(f));
             if (isRehashing_()) {
-                forEachInTable_(hash_tables_[1],std::forward<FUNCTION>(f));
+                forEachInTable_(hash_tables_[1], std::forward<FUNCTION>(f));
             }
         }
 
@@ -208,7 +232,43 @@ namespace hyper {
             std::size_t used{};
         };
 
-        template<typename Q>
+        static std::mt19937& randomEngine_() {
+            static std::random_device rd;
+            static std::mt19937 gen(rd());
+            return gen;
+        }
+
+        static const dictEntry* randomEntryFromTable_(const dictHt& ht) {
+            if (ht.used == 0 || ht.table.empty()) {
+                return nullptr;
+            }
+
+            std::uniform_int_distribution<std::size_t> bucket_dist(0, ht.mask);
+            std::size_t h = bucket_dist(randomEngine_());
+
+            for (std::size_t visited = 0; visited < ht.table.size(); ++visited) {
+                if (ht.table[h] != nullptr) {
+                    const dictEntry* h_entry = ht.table[h];
+                    std::size_t list_len = 0;
+                    const dictEntry* tmp = h_entry;
+                    while (tmp) {
+                        ++list_len;
+                        tmp = tmp->next;
+                    }
+                    std::uniform_int_distribution<std::size_t> list_dist(0, list_len - 1);
+                    std::size_t list_index = list_dist(randomEngine_());
+                    while (list_index--) {
+                        h_entry = h_entry->next;
+                    }
+                    return h_entry;
+                }
+                h = (h + 1) & ht.mask;
+            }
+
+            return nullptr;
+        }
+
+        template <typename Q>
         bool eraseImpl_(const Q& k) {
             if (isRehashing_()) {
                 rehashStep_();
@@ -254,7 +314,7 @@ namespace hyper {
             ++current_ht.used;
         }
 
-        template<typename Q>
+        template <typename Q>
         dictEntry* find_(const Q& k) {
             if (auto res = findInTable_(hash_tables_[0], k)) {
                 return res;
@@ -265,7 +325,7 @@ namespace hyper {
             return nullptr;
         }
 
-        template<typename Q>
+        template <typename Q>
         const dictEntry* find_(const Q& k) const {
             if (auto res = findInTable_(hash_tables_[0], k)) {
                 return res;
@@ -276,7 +336,7 @@ namespace hyper {
             return nullptr;
         }
 
-        template<typename Q>
+        template <typename Q>
         dictEntry* findInTable_(dictHt& ht, const Q& k) noexcept {
             if (ht.table.empty()) {
                 return nullptr;
@@ -293,7 +353,7 @@ namespace hyper {
             return nullptr;
         }
 
-        template<typename Q>
+        template <typename Q>
         const dictEntry* findInTable_(const dictHt& ht, const Q& k) const noexcept {
             if (ht.table.empty()) {
                 return nullptr;
@@ -315,7 +375,7 @@ namespace hyper {
             return rehash_index_ != -1;
         }
 
-        template<typename Q>
+        template <typename Q>
         std::size_t getBucketIndex_(const dictHt& ht, const Q& k) const noexcept {
             assert(!ht.table.empty());
             return hash_(k) & ht.mask;
@@ -393,18 +453,18 @@ namespace hyper {
 
         [[nodiscard]] bool needShrink_() const noexcept {
             return !isRehashing_() &&
-                   hash_tables_[0].table.size() > MinBucketSize &&
-                   hash_tables_[0].used / static_cast<double>(hash_tables_[0].table.size()) <= ShrinkFactor;
+                hash_tables_[0].table.size() > MinBucketSize &&
+                hash_tables_[0].used / static_cast<double>(hash_tables_[0].table.size()) <= ShrinkFactor;
         }
 
         [[nodiscard]] std::size_t getShrinkTarget_() const noexcept {
             return normalizeBucketCount_(std::max(static_cast<std::size_t>(4), hash_tables_[0].used * 2));
         }
 
-        template<typename FUNCTION>
-            requires std::invocable<FUNCTION,const K&,const V&>
+        template <typename FUNCTION>
+            requires std::invocable<FUNCTION, const K&, const V&>
         void forEachInTable_(const dictHt& ht, FUNCTION&& fn) const {
-            for (auto& bucket: ht.table) {
+            for (auto& bucket : ht.table) {
                 if (bucket != nullptr) {
                     const dictEntry* cur = bucket;
                     while (cur) {
@@ -415,10 +475,10 @@ namespace hyper {
             }
         }
 
-        template<typename FUNCTION>
-            requires std::invocable<FUNCTION,const K&,V&>
+        template <typename FUNCTION>
+            requires std::invocable<FUNCTION, const K&, V&>
         void forEachInTable_(dictHt& ht, FUNCTION&& fn) {
-            for (auto& bucket: ht.table) {
+            for (auto& bucket : ht.table) {
                 if (bucket != nullptr) {
                     dictEntry* cur = bucket;
                     while (cur) {
@@ -434,7 +494,7 @@ namespace hyper {
         static constexpr std::size_t MinBucketSize = 4;
         static constexpr double ShrinkFactor = 0.25;
 
-        std::array<dictHt,2> hash_tables_;
+        std::array<dictHt, 2> hash_tables_;
         std::ptrdiff_t rehash_index_;
         Hash hash_;
         KeyEqual key_equal_;

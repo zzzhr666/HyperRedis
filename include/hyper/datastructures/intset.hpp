@@ -6,6 +6,7 @@
 #include <cstring>
 #include <limits>
 #include <vector>
+#include <cassert>
 
 namespace hyper {
     class intset {
@@ -36,6 +37,11 @@ namespace hyper {
             }
             std::size_t pos{0};
             return search_(value, pos);
+        }
+
+        [[nodiscard]] std::int64_t getAt(std::size_t index) const {
+            assert(index < length_);
+            return get_(index);
         }
 
         bool insert(std::int64_t value) {
@@ -87,7 +93,7 @@ namespace hyper {
             }
         }
 
-        [[nodiscard]]std::size_t byteSize() const noexcept {
+        [[nodiscard]] std::size_t byteSize() const noexcept {
             return contents_.size();
         }
 
@@ -204,9 +210,9 @@ namespace hyper {
                 set_(0, value);
             } else {
                 for (std::size_t i = old_len; i > 0; --i) {
-                    set_(i - 1,readWithEncoding_(i - 1,old_encoding));
+                    set_(i - 1, readWithEncoding_(i - 1, old_encoding));
                 }
-                set_(old_len,value);
+                set_(old_len, value);
             }
         }
 

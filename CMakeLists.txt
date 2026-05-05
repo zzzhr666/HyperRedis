@@ -137,6 +137,17 @@ target_link_libraries(object_stress_test
         spdlog::spdlog
 )
 
+add_executable(redis_object_redis_behavior_test
+    test/redis_object_redis_behavior_test.cpp
+)
+
+target_link_libraries(redis_object_redis_behavior_test
+    PRIVATE
+        GTest::gtest_main
+        HyperRedisCore
+        spdlog::spdlog
+)
+
 include(GoogleTest)
 gtest_discover_tests(linked_list_test)
 gtest_discover_tests(dict_test)
@@ -146,3 +157,4 @@ gtest_discover_tests(ziplist_test)
 gtest_discover_tests(object_test)
 gtest_discover_tests(zset_test)
 gtest_discover_tests(object_stress_test)
+gtest_discover_tests(redis_object_redis_behavior_test)

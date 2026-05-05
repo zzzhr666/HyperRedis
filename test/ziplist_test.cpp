@@ -127,6 +127,22 @@ TEST(ZiplistTest, EraseRemovesMiddleElement) {
     expectStringAt(values, 1, "gamma");
 }
 
+TEST(ZiplistTest, EraseRangeRemovesContiguousEntries) {
+    ziplist values;
+    values.pushBack("alpha");
+    values.pushBack("beta");
+    values.pushBack("gamma");
+    values.pushBack("delta");
+    values.pushBack("epsilon");
+
+    EXPECT_EQ(values.eraseRange(1, 3), 3U);
+    EXPECT_EQ(snapshot(values), (std::vector<std::string>{"alpha", "epsilon"}));
+    expectStringAt(values, 1, "epsilon");
+
+    EXPECT_EQ(values.eraseRange(1, 100), 1U);
+    EXPECT_EQ(snapshot(values), (std::vector<std::string>{"alpha"}));
+}
+
 // ============================================================================
 // ========================= 整数编码黑魔法测试 =================================
 // ============================================================================

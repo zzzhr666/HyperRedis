@@ -8,7 +8,7 @@ class ZSetObjectTest : public ::testing::Test {
 protected:
     std::unique_ptr<RedisObject> zset;
     void SetUp() override {
-        zset = RedisObject::createZSetObject();
+        zset = RedisObject::createUniqueZSetObject();
     }
 };
 
@@ -134,3 +134,102 @@ TEST_F(ZSetObjectTest, LexicalOrderForSameScore) {
     EXPECT_EQ(zset->zSetRank("cherry"), 2);
 }
 
+TEST_F(ZSetObjectTest, ZSetZipListLookupIgnoresMatchingScoreEntries) {
+    // 强制使用 ZipList 编码
+    EXPECT_EQ(zset->getEncoding(), ObjectEncoding::ZipList);
+
+    // 插入成员 "member1"，其分数为 100.0 (格式化后可能是 "100")
+    // 然后插入另一个成员 "100"，其分数为 200.0
+    zset->zSetAdd("member1", 100.0);
+    zset->zSetAdd("100", 200.0);
+
+    EXPECT_EQ(zset->zSetSize(), 2);
+
+    // 检查 "100" 是否能被正确查找到
+    // 如果实现有 Bug (直接用 find)，可能会匹配到第一个成员的分数条目（索引 1）
+    auto score = zset->zSetScore("100");
+    ASSERT_TRUE(score.has_value());
+    EXPECT_DOUBLE_EQ(*score, 200.0);
+
+    EXPECT_EQ(zset->zSetRank("100"), 1);
+
+    // 移除测试
+    EXPECT_TRUE(zset->zSetRemove("100"));
+    EXPECT_EQ(zset->zSetSize(), 1);
+    EXPECT_TRUE(zset->zSetScore("member1").has_value());
+    EXPECT_FALSE(zset->zSetScore("100").has_value());
+}
+
+TEST_F(ZSetObjectTest, RemoveRangeByRankUsesContiguousZipListDelete) {
+    for (int i = 0; i < 6; ++i) {
+        zset->zSetAdd("m" + std::to_string(i), static_cast<double>(i));
+    }
+    ASSERT_EQ(zset->getEncoding(), ObjectEncoding::ZipList);
+
+    EXPECT_EQ(zset->zSetRemoveRangeByRank(1, 3), 3U);
+    EXPECT_EQ(zset->zSetSize(), 3U);
+
+    EXPECT_TRUE(zset->zSetScore("m0").has_value());
+    EXPECT_FALSE(zset->zSetScore("m1").has_value());
+    EXPECT_FALSE(zset->zSetScore("m2").has_value());
+    EXPECT_FALSE(zset->zSetScore("m3").has_value());
+    EXPECT_TRUE(zset->zSetScore("m4").has_value());
+    EXPECT_TRUE(zset->zSetScore("m5").has_value());
+    EXPECT_EQ(zset->zSetRank("m4"), 1U);
+}
+
+TEST_F(ZSetObjectTest, RemoveRangeByScoreUsesContiguousZipListDelete) {
+    for (int i = 0; i < 6; ++i) {
+        zset->zSetAdd("m" + std::to_string(i), static_cast<double>(i));
+    }
+    ASSERT_EQ(zset->getEncoding(), ObjectEncoding::ZipList);
+
+    EXPECT_EQ(zset->zSetRemoveRangeByScore(2.0, 4.0), 3U);
+    EXPECT_EQ(zset->zSetSize(), 3U);
+
+    EXPECT_TRUE(zset->zSetScore("m0").has_value());
+    EXPECT_TRUE(zset->zSetScore("m1").has_value());
+    EXPECT_FALSE(zset->zSetScore("m2").has_value());
+    EXPECT_FALSE(zset->zSetScore("m3").has_value());
+    EXPECT_FALSE(zset->zSetScore("m4").has_value());
+    EXPECT_TRUE(zset->zSetScore("m5").has_value());
+    EXPECT_EQ(zset->zSetRank("m5"), 2U);
+}
+
+TEST_F(ZSetObjectTest, RemoveRangeByRankSyncsSkipListAndDict) {
+    for (int i = 0; i < 20; ++i) {
+        zset->zSetAdd("m" + std::to_string(i), static_cast<double>(i));
+    }
+    ASSERT_EQ(zset->getEncoding(), ObjectEncoding::SkipList);
+
+    EXPECT_EQ(zset->zSetRemoveRangeByRank(3, 7), 5U);
+    EXPECT_EQ(zset->zSetSize(), 15U);
+
+    for (int i = 3; i <= 7; ++i) {
+        EXPECT_FALSE(zset->zSetScore("m" + std::to_string(i)).has_value());
+        EXPECT_FALSE(zset->zSetRank("m" + std::to_string(i)).has_value());
+    }
+
+    EXPECT_TRUE(zset->zSetScore("m2").has_value());
+    EXPECT_TRUE(zset->zSetScore("m8").has_value());
+    EXPECT_EQ(zset->zSetRank("m8"), 3U);
+}
+
+TEST_F(ZSetObjectTest, RemoveRangeByScoreSyncsSkipListAndDict) {
+    for (int i = 0; i < 20; ++i) {
+        zset->zSetAdd("m" + std::to_string(i), static_cast<double>(i));
+    }
+    ASSERT_EQ(zset->getEncoding(), ObjectEncoding::SkipList);
+
+    EXPECT_EQ(zset->zSetRemoveRangeByScore(5.0, 8.0), 4U);
+    EXPECT_EQ(zset->zSetSize(), 16U);
+
+    for (int i = 5; i <= 8; ++i) {
+        EXPECT_FALSE(zset->zSetScore("m" + std::to_string(i)).has_value());
+        EXPECT_FALSE(zset->zSetRank("m" + std::to_string(i)).has_value());
+    }
+
+    EXPECT_TRUE(zset->zSetScore("m4").has_value());
+    EXPECT_TRUE(zset->zSetScore("m9").has_value());
+    EXPECT_EQ(zset->zSetRank("m9"), 5U);
+}

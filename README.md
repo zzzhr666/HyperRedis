@@ -123,43 +123,30 @@ src/
 
 ## 当前状态
 
-仓库已经不再只是工程初始化状态，当前已经进入核心数据结构的第一阶段实现。
+仓库已经完成对象层和底层数据结构的第一轮较大重构，当前重点是为后续 `redisDb` 和命令层打地基。
 
-目前已完成的内容包括：
+目前已经完成的内容：
 
 - **底层数据结构**：
-    - `linked_list`：基础双向链表，支持双端操作、查找与遍历。
-    - `dict`：支持渐进式 rehash 的哈希字典，支持透明字符串查找。
-    - `skipList`：支持分值/排名双维度查询的高效跳表，已实现 C++20 透明查找优化。
-    - `intset`：支持自动编码升级（Int16/32/64）的紧凑整数集合。
-    - `ziplist`：初步实现紧凑字节布局，支持变长字符串 entry 编码。
-- **核心对象模型 (RedisObject)**：
-    - **String**：支持 `Raw` (std::string) 与 `Int` (long) 编码。实现了 `append`、`stringLen`、`incrBy` (支持自动转 Int)、`incrByFloat`、`getRange` (支持负数索引)、`setRange` (支持 \0 填充)。
-    - **Hash**：基于 `dict` 实现，支持 `hset`/`hget` 及递归对象嵌套。
-    - **List**：支持 `ZipList` 到 `LinkedList` 的透明自动升级，实现了双端推拉操作。
-    - **Set**：支持 `IntSet` 到 `HashTable` 的透明自动升级，支持数值与字符串成员混合存储。
-    - **ZSet**：支持 `ZipList` 到 `SkipList` 的透明自动升级。实现了 `zadd`、`zscore`、`zrem`、`zcard`、`zrank` 等核心语义。
-- **工程化**：
-    - 采用 **Passkey Pattern** 保证对象工厂的安全调用。
-    - 针对 `std::unique_ptr` 配合 `std::variant` 处理不完整类型的挑战，设计了高效的解耦方案。
-    - **测试保障**：已接入 GoogleTest，累计覆盖 **100+** 个测试用例，涵盖基础边界、编码升级、数据一致性等。
-
-### ZSet 已具备的能力
-
-- **双编码切换**：成员数量超过 16 个或成员长度超过 64 字节时，自动从 `ZipList` 升级到 `dict + skipList` 结构。
-- **高效查询**：跳表支持 `getRank` 和 `erase` 等操作的 **透明查找 (Transparent Lookup)**，查找 `std::string_view` 无需构造临时字符串。
-- **排序语义**：严格遵循 Redis 标准，分值相同时按成员名字典序排列。
-- **核心辅助**：基于 `std::from_chars` 和 `std::to_chars` 实现了极高性能的 score 解析与格式化。
-
-### String 已具备的能力
-
-- **智能编码**：`incrBy` 操作时如果字符串是合法整数，会自动将编码由 `Raw` 优化为 `Int` 以节省内存并加速后续运算。
-- **健壮性**：`incrBy` 系列操作在解析失败时能保持原数据不被破坏（通过 `std::optional` 错误处理机制）。
-- **完全兼容**：`getRange` 严格遵循 Redis 风格的负数索引转换与边界截断逻辑；`setRange` 完美处理越界填充。
+  - `dict`：支持渐进式 rehash、透明字符串查找，并补强了随机 key 选择逻辑。
+  - `skipList`：支持按 score / rank 的查询和区间删除，新增按 rank 的安全遍历接口。
+  - `intset`：支持自动编码升级（Int16/32/64）的紧凑整数集合。
+  - `ziplist`：支持连续区间删除，并用于 list/hash/zset 的紧凑编码。
+  - `linked_list`：作为 list 的展开编码，支持双端操作与遍历。
+- **核心对象层**：
+  - `RedisObject` 已覆盖 String / Hash / List / Set / ZSet 的主要行为。
+  - String 增加了溢出检查和浮点非法值处理。
+  - Hash/List/Set/ZSet 都提供了更适合 DB 层调用的结果接口。
+  - ZSet 现在区分新增、更新、无变化和非法 score，且 ziplist / skiplist 两种编码的行为已对齐。
+- **测试**：
+  - 已接入 GoogleTest，测试目录位于 `test/`。
+  - 当前已有 160 个测试全部通过，覆盖基础结构、编码切换、对象行为和 Redis 可见语义。
+  - 新增了 `redis_object_redis_behavior_test.cpp`，专门对照 Redis 的外部行为做回归验证。
 
 ## 接下来的重点
 
-- `redisDb`：实现多数据库管理、主字典与过期字典逻辑。
-- 过期策略：实现惰性删除与定期删除思路。
-- 持久化：初步探索 RDB 快照的 save/load 流程。
-- 服务器接入：基于 Muduo 的网络层集成（后续阶段）。
+- `redisDb`：实现多数据库管理、主字典与过期字典。
+- 命令层：把对象层暴露的能力收敛成 Redis 命令语义。
+- 过期策略：实现惰性删除与定期删除。
+- 持久化：初步探索 RDB 快照的 save/load。
+- 服务器接入：后续再接 Muduo 和网络层。

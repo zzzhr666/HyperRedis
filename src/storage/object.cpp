@@ -1,9 +1,15 @@
 #include <array>
 #include <cassert>
 #include <charconv>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <random>
 
 #include "hyper/storage/object.hpp"
+
+#include <ranges>
+
 #include "hyper/datastructures/dict.hpp"
 #include "hyper/datastructures/intset.hpp"
 #include "hyper/datastructures/linked_list.hpp"
@@ -13,12 +19,12 @@
 
 namespace hyper {
     struct RedisDict {
-        dict<std::string, std::shared_ptr<RedisObject>, transparentStringHash, transparentStringEqual> storage;
+        dict<std::string, RedisObjectPtr, transparentStringHash, transparentStringEqual> storage;
     };
 
 
     struct RedisList {
-        list<std::shared_ptr<RedisObject>> storage;
+        list<RedisObjectPtr> storage;
     };
 
     struct RedisSet {
@@ -29,6 +35,22 @@ namespace hyper {
         skipList<double, std::string> order;
         dict<std::string, double, transparentStringHash, transparentStringEqual> score;
     };
+
+    namespace {
+        [[nodiscard]] bool checkedAddLong(long lhs, long rhs, long& out) noexcept {
+            if ((rhs > 0 && lhs > std::numeric_limits<long>::max() - rhs) ||
+                (rhs < 0 && lhs < std::numeric_limits<long>::min() - rhs)) {
+                return false;
+            }
+            out = lhs + rhs;
+            return true;
+        }
+
+        [[nodiscard]] bool isInvalidScore(double score) noexcept {
+            return std::isnan(score);
+        }
+
+    }
 }
 
 
@@ -37,7 +59,7 @@ hyper::RedisObject::RedisObject(ObjectType type, ObjectEncoding encoding, Object
 
 hyper::RedisObject::~RedisObject() = default;
 
-std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createStringObject(std::string_view val) {
+hyper::RedisObjectUPtr hyper::RedisObject::createUniqueStringObject(std::string_view val) {
     if (val.empty() ||
         (val.size() > 1 && val[0] == '0') ||
         (val.size() >= 2 && val[0] == '-' && val[1] == '0')) {
@@ -48,34 +70,76 @@ std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createStringObject(std::
     long value{};
     auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), value);
     if (ptr == val.data() + val.size() && ec == std::errc()) {
-        return createLongObject(value);
+        return createUniqueLongObject(value);
     }
 
     return std::make_unique<RedisObject>(ObjectType::String,
                                          ObjectEncoding::Raw, std::string(val), Token{});
 }
 
-std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createLongObject(long val) {
+hyper::RedisObjectUPtr hyper::RedisObject::createUniqueLongObject(long val) {
     return std::make_unique<RedisObject>(ObjectType::String, ObjectEncoding::Int, val, Token{});
 }
 
-std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createHashObject() {
-    return std::make_unique<RedisObject>(ObjectType::Hash, ObjectEncoding::HashTable,
-                                         ObjectData(std::make_unique<RedisDict>()), Token{});
+hyper::RedisObjectUPtr hyper::RedisObject::createUniqueHashObject() {
+    return std::make_unique<RedisObject>(ObjectType::Hash, ObjectEncoding::ZipList,
+                                         ObjectData(std::make_unique<RedisZiplist>()), Token{});
 }
 
-std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createListObject() {
+hyper::RedisObjectUPtr hyper::RedisObject::createUniqueListObject() {
     return std::make_unique<RedisObject>(ObjectType::List, ObjectEncoding::ZipList,
                                          ObjectData(std::make_unique<RedisZiplist>()), Token{});
 }
 
-std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createSetObject() {
+hyper::RedisObjectUPtr hyper::RedisObject::createUniqueSetObject() {
     return std::make_unique<RedisObject>(ObjectType::Set, ObjectEncoding::IntSet,
                                          ObjectData(std::make_unique<RedisIntset>()), Token{});
 }
 
-std::unique_ptr<hyper::RedisObject> hyper::RedisObject::createZSetObject() {
+hyper::RedisObjectUPtr hyper::RedisObject::createUniqueZSetObject() {
     return std::make_unique<RedisObject>(ObjectType::ZSet, ObjectEncoding::ZipList,
+                                         ObjectData(std::make_unique<RedisZiplist>()), Token{});
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::createSharedStringObject(std::string_view val) {
+    if (val.empty() ||
+        (val.size() > 1 && val[0] == '0') ||
+        (val.size() >= 2 && val[0] == '-' && val[1] == '0')) {
+        return std::make_shared<RedisObject>(ObjectType::String,
+                                             ObjectEncoding::Raw, std::string(val), Token{});
+    }
+
+    long value{};
+    auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), value);
+    if (ptr == val.data() + val.size() && ec == std::errc()) {
+        return createSharedLongObject(value);
+    }
+
+    return std::make_shared<RedisObject>(ObjectType::String,
+                                         ObjectEncoding::Raw, std::string(val), Token{});
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::createSharedLongObject(long val) {
+    return std::make_shared<RedisObject>(ObjectType::String, ObjectEncoding::Int, val, Token{});
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::createSharedHashObject() {
+    return std::make_shared<RedisObject>(ObjectType::Hash, ObjectEncoding::ZipList,
+                                         ObjectData(std::make_unique<RedisZiplist>()), Token{});
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::createSharedListObject() {
+    return std::make_shared<RedisObject>(ObjectType::List, ObjectEncoding::ZipList,
+                                         ObjectData(std::make_unique<RedisZiplist>()), Token{});
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::createSharedSetObject() {
+    return std::make_shared<RedisObject>(ObjectType::Set, ObjectEncoding::IntSet,
+                                         ObjectData(std::make_unique<RedisIntset>()), Token{});
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::createSharedZSetObject() {
+    return std::make_shared<RedisObject>(ObjectType::ZSet, ObjectEncoding::ZipList,
                                          ObjectData(std::make_unique<RedisZiplist>()), Token{});
 }
 
@@ -112,7 +176,11 @@ std::optional<long> hyper::RedisObject::stringIncrBy(long increment) {
     assert(type_ == ObjectType::String);
     if (encoding_ == ObjectEncoding::Int) {
         auto& res = std::get<long>(data_);
-        res += increment;
+        long updated{};
+        if (!checkedAddLong(res, increment, updated)) {
+            return std::nullopt;
+        }
+        res = updated;
         return res;
     }
     if (encoding_ == ObjectEncoding::Raw) {
@@ -120,10 +188,13 @@ std::optional<long> hyper::RedisObject::stringIncrBy(long increment) {
         auto& origin = std::get<std::string>(data_);
         auto [ptr,ec] = std::from_chars(origin.data(), origin.data() + origin.size(), value);
         if (ptr == origin.data() + origin.size() && ec == std::errc()) {
-            value += increment;
+            long updated{};
+            if (!checkedAddLong(value, increment, updated)) {
+                return std::nullopt;
+            }
             encoding_ = ObjectEncoding::Int;
-            data_ = value;
-            return value;
+            data_ = updated;
+            return updated;
         }
         return std::nullopt;
     }
@@ -133,6 +204,9 @@ std::optional<long> hyper::RedisObject::stringIncrBy(long increment) {
 
 std::optional<double> hyper::RedisObject::stringIncrByFloat(double increment) {
     assert(type_ == ObjectType::String);
+    if (isInvalidScore(increment)) {
+        return std::nullopt;
+    }
     double value{};
     if (encoding_ == ObjectEncoding::Int) {
         value = static_cast<double>(std::get<long>(data_));
@@ -144,6 +218,9 @@ std::optional<double> hyper::RedisObject::stringIncrByFloat(double increment) {
         }
     }
     value += increment;
+    if (isInvalidScore(value)) {
+        return std::nullopt;
+    }
     auto fmt_str = formatScore_(value);
     encoding_ = ObjectEncoding::Raw;
     data_ = std::move(fmt_str);
@@ -194,48 +271,255 @@ void hyper::RedisObject::stringSetRange(std::size_t offset, std::string_view val
     }
 }
 
-bool hyper::RedisObject::hashSet(std::string field, std::shared_ptr<RedisObject> value) {
+bool hyper::RedisObject::hashSet(std::string field, RedisObjectPtr value) {
     assert(type_ == ObjectType::Hash);
     assert(value);
-    auto& hash_table = std::get<std::unique_ptr<RedisDict>>(data_);
-    return hash_table->storage.insertOrAssign(std::move(field), std::move(value));
+    auto value_str = value->asString();
+    if (encoding_ == ObjectEncoding::ZipList) {
+        if (field.size() > ZipListMaxValue || value_str.size() > ZipListMaxValue) {
+            convertHashZipListToDict_();
+            return hashSet(std::move(field), std::move(value));
+        }
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == field) {
+                ziplist->erase(i + 1);
+                ziplist->insert(i + 1, value_str);
+                return false;
+            }
+        }
+
+        ziplist->pushBack(field);
+        ziplist->pushBack(value_str);
+        if (ziplist->size() / 2 > HashZipListMaxEntries) {
+            convertHashZipListToDict_();
+        }
+        return true;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& hash_table = std::get<std::unique_ptr<RedisDict>>(data_);
+        return hash_table->storage.insertOrAssign(std::move(field), std::move(value));
+    }
+    assert(false);
+    return false;
 }
 
-std::shared_ptr<hyper::RedisObject> hyper::RedisObject::hashGet(std::string_view field) const {
+hyper::RedisObjectPtr hyper::RedisObject::hashGet(std::string_view field) const {
     assert(type_ == ObjectType::Hash);
-    auto& hash_table = std::get<std::unique_ptr<RedisDict>>(data_);
-    if (auto res = hash_table->storage.get(field)) {
-        return *res;
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == field) {
+                return createSharedStringObject(getEntryAsString_((*ziplist)[i + 1]));
+            }
+        }
+        return nullptr;
     }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& hash_table = std::get<std::unique_ptr<RedisDict>>(data_);
+        if (auto res = hash_table->storage.get(field)) {
+            return *res;
+        }
+        return nullptr;
+    }
+    assert(false);
     return nullptr;
 }
 
 bool hyper::RedisObject::hashRemove(std::string_view field) {
     assert(type_ == ObjectType::Hash);
-    return std::get<std::unique_ptr<RedisDict>>(data_)->storage.erase(field);
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == field) {
+                ziplist->erase(i);
+                ziplist->erase(i);
+                return true;
+            }
+        }
+        return false;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        return std::get<std::unique_ptr<RedisDict>>(data_)->storage.erase(field);
+    }
+
+    assert(false);
+    return false;
 }
 
 std::size_t hyper::RedisObject::hashSize() const {
     assert(type_ == ObjectType::Hash);
-    return std::get<std::unique_ptr<RedisDict>>(data_)->storage.size();
+    if (encoding_ == ObjectEncoding::ZipList) {
+        return std::get<std::unique_ptr<RedisZiplist>>(data_)->size() / 2;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        return std::get<std::unique_ptr<RedisDict>>(data_)->storage.size();
+    }
+    assert(false);
+    return 0;
 }
 
 bool hyper::RedisObject::hashContains(std::string_view field) const {
     assert(type_ == ObjectType::Hash);
-    return std::get<std::unique_ptr<RedisDict>>(data_)->storage.contains(field);
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == field) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        return std::get<std::unique_ptr<RedisDict>>(data_)->storage.contains(field);
+    }
+    assert(false);
+    return false;
 }
 
 void hyper::RedisObject::hashForEach(
-    const std::function<void(std::string_view, const std::shared_ptr<RedisObject>&)>& func) const {
+    const std::function<void(std::string_view, const RedisObjectPtr&)>& func) const {
     assert(type_ == ObjectType::Hash);
-    std::get<std::unique_ptr<RedisDict>>(data_)->storage.forEach(
-        [&func](const std::string& field, const std::shared_ptr<RedisObject>& value) {
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        bool is_field = true;
+        std::string field;
+        ziplist->forEach([&is_field,&func,&field](const ziplistEntryView& entry_view) {
+            if (is_field) {
+                field = getEntryAsString_(entry_view);
+                is_field = !is_field;
+                return;
+            }
+            RedisObjectPtr value = createSharedStringObject(getEntryAsString_(entry_view));
             func(field, value);
+            is_field = !is_field;
         });
+        return;
+    }
+
+    if (encoding_ == ObjectEncoding::HashTable) {
+        std::get<std::unique_ptr<RedisDict>>(data_)->storage.forEach(
+            [&func](const std::string& field, const RedisObjectPtr& value) {
+                func(field, value);
+            });
+        return;
+    }
+    assert(false);
+}
+
+std::vector<std::string> hyper::RedisObject::hashKeys() const {
+    assert(type_ == ObjectType::Hash);
+    std::vector<std::string> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            res.emplace_back(getEntryAsString_((*ziplist)[i]));
+        }
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& dict = std::get<std::unique_ptr<RedisDict>>(data_)->storage;
+        dict.forEach([&res](const std::string& k, const RedisObjectPtr&) {
+            res.emplace_back(k);
+        });
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+std::vector<hyper::RedisObjectPtr> hyper::RedisObject::hashValues() const {
+    assert(type_ == ObjectType::Hash);
+    std::vector<RedisObjectPtr> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 1; i < ziplist->size(); i += 2) {
+            res.emplace_back(createSharedStringObject(getEntryAsString_((*ziplist)[i])));
+        }
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& dict = std::get<std::unique_ptr<RedisDict>>(data_)->storage;
+        dict.forEach([&res](const std::string&, const RedisObjectPtr& v) {
+            res.emplace_back(v);
+        });
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+std::vector<std::pair<std::string, hyper::RedisObjectPtr>> hyper::RedisObject::hashGetAll() const {
+    assert(type_ == ObjectType::Hash);
+    std::vector<std::pair<std::string, RedisObjectPtr>> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            res.emplace_back(getEntryAsString_((*ziplist)[i]),
+                             createSharedStringObject(getEntryAsString_((*ziplist)[i + 1])));
+        }
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& dict = std::get<std::unique_ptr<RedisDict>>(data_)->storage;
+        dict.forEach([&res](const std::string& k, const RedisObjectPtr& v) {
+            res.emplace_back(k, v);
+        });
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+std::vector<std::string> hyper::RedisObject::hashValuesAsStrings() const {
+    assert(type_ == ObjectType::Hash);
+    std::vector<std::string> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 1; i < ziplist->size(); i += 2) {
+            res.emplace_back(getEntryAsString_((*ziplist)[i]));
+        }
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& dict = std::get<std::unique_ptr<RedisDict>>(data_)->storage;
+        dict.forEach([&res](const std::string&, const RedisObjectPtr& v) {
+            res.emplace_back(v->asString());
+        });
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+std::vector<std::pair<std::string, std::string>> hyper::RedisObject::hashGetAllAsStrings() const {
+    assert(type_ == ObjectType::Hash);
+    std::vector<std::pair<std::string, std::string>> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            res.emplace_back(getEntryAsString_((*ziplist)[i]), getEntryAsString_((*ziplist)[i + 1]));
+        }
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& dict = std::get<std::unique_ptr<RedisDict>>(data_)->storage;
+        dict.forEach([&res](const std::string& k, const RedisObjectPtr& v) {
+            res.emplace_back(k, v->asString());
+        });
+        return res;
+    }
+
+    assert(false);
+    return res;
 }
 
 
-void hyper::RedisObject::listLeftPush(const std::shared_ptr<RedisObject>& value) {
+void hyper::RedisObject::listLeftPush(const RedisObjectPtr& value) {
     assert(type_ == ObjectType::List);
     assert(value);
     assert(value->getType() == ObjectType::String);
@@ -255,7 +539,7 @@ void hyper::RedisObject::listLeftPush(const std::shared_ptr<RedisObject>& value)
     }
 }
 
-void hyper::RedisObject::listRightPush(const std::shared_ptr<RedisObject>& value) {
+void hyper::RedisObject::listRightPush(const RedisObjectPtr& value) {
     assert(type_ == ObjectType::List);
     assert(value);
     assert(value->getType() == ObjectType::String);
@@ -275,13 +559,13 @@ void hyper::RedisObject::listRightPush(const std::shared_ptr<RedisObject>& value
     }
 }
 
-std::shared_ptr<hyper::RedisObject> hyper::RedisObject::listLeftPop() {
+hyper::RedisObjectPtr hyper::RedisObject::listLeftPop() {
     assert(type_ == ObjectType::List);
     if (encoding_ == ObjectEncoding::ZipList) {
         auto& zip_list = std::get<std::unique_ptr<RedisZiplist>>(data_);
         auto left = zip_list->popFront();
         if (left.has_value()) {
-            return createStringObject(left.value());
+            return createSharedStringObject(left.value());
         }
         return nullptr;
     }
@@ -298,13 +582,13 @@ std::shared_ptr<hyper::RedisObject> hyper::RedisObject::listLeftPop() {
     return nullptr;
 }
 
-std::shared_ptr<hyper::RedisObject> hyper::RedisObject::listRightPop() {
+hyper::RedisObjectPtr hyper::RedisObject::listRightPop() {
     assert(type_ == ObjectType::List);
     if (encoding_ == ObjectEncoding::ZipList) {
         auto& zip_list = std::get<std::unique_ptr<RedisZiplist>>(data_);
         auto left = zip_list->popBack();
         if (left.has_value()) {
-            return createStringObject(left.value());
+            return createSharedStringObject(left.value());
         }
         return nullptr;
     }
@@ -334,7 +618,7 @@ std::size_t hyper::RedisObject::listLen() const {
     return 0;
 }
 
-std::shared_ptr<hyper::RedisObject> hyper::RedisObject::listIndex(int index) const {
+hyper::RedisObjectPtr hyper::RedisObject::listIndex(int index) const {
     assert(type_ == ObjectType::List);
     std::size_t len = listLen();
     if (len == 0) {
@@ -349,12 +633,11 @@ std::shared_ptr<hyper::RedisObject> hyper::RedisObject::listIndex(int index) con
 
     if (encoding_ == ObjectEncoding::ZipList) {
         auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
-        return createStringObject(getEntryAsString_(ziplist->at(index).value()));
+        return createSharedStringObject(getEntryAsString_((*ziplist)[index]));
     }
     if (encoding_ == ObjectEncoding::LinkedList) {
         auto& list = std::get<std::unique_ptr<RedisList>>(data_)->storage;
         std::size_t current_index{0};
-        std::shared_ptr<RedisObject> res;
         for (auto it = list.begin(); it != list.end(); ++it, ++current_index) {
             if (current_index == index) {
                 return *it;
@@ -366,7 +649,38 @@ std::shared_ptr<hyper::RedisObject> hyper::RedisObject::listIndex(int index) con
     return nullptr;
 }
 
-bool hyper::RedisObject::listSet(int index, const std::shared_ptr<RedisObject>& value) {
+std::optional<std::string> hyper::RedisObject::listIndexAsString(int index) const {
+    assert(type_ == ObjectType::List);
+    std::size_t len = listLen();
+    if (len == 0) {
+        return std::nullopt;
+    }
+    if (index < 0) {
+        index += static_cast<int>(len);
+    }
+    if (index < 0 || index >= static_cast<int>(len)) {
+        return std::nullopt;
+    }
+
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        return getEntryAsString_((*ziplist)[static_cast<std::size_t>(index)]);
+    }
+    if (encoding_ == ObjectEncoding::LinkedList) {
+        auto& list = std::get<std::unique_ptr<RedisList>>(data_)->storage;
+        std::size_t current_index{0};
+        for (const auto& item : list) {
+            if (current_index++ == static_cast<std::size_t>(index)) {
+                return item->asString();
+            }
+        }
+    }
+
+    assert(false);
+    return std::nullopt;
+}
+
+bool hyper::RedisObject::listSet(int index, const RedisObjectPtr& value) {
     assert(type_ == ObjectType::List);
     std::size_t len = listLen();
     if (index < 0) {
@@ -402,7 +716,7 @@ bool hyper::RedisObject::listSet(int index, const std::shared_ptr<RedisObject>& 
 }
 
 std::optional<std::size_t> hyper::RedisObject::listInsert(std::string_view pivot,
-                                                          const std::shared_ptr<RedisObject>& value, bool before) {
+                                                          const RedisObjectPtr& value, bool before) {
     assert(type_ == ObjectType::List);
     auto len = listLen();
     if (encoding_ == ObjectEncoding::ZipList) {
@@ -460,7 +774,7 @@ std::size_t hyper::RedisObject::listRemove(int count, std::string_view value) {
         if (from_front) {
             std::size_t index{0};
             while (index < len) {
-                auto current = getEntryAsString_(ziplist->at(index).value());
+                auto current = getEntryAsString_((*ziplist)[index]);
                 if (current == value) {
                     ziplist->erase(index);
                     --len;
@@ -474,7 +788,7 @@ std::size_t hyper::RedisObject::listRemove(int count, std::string_view value) {
             return ret;
         }
         for (int i = len - 1; i >= 0; --i) {
-            auto current = getEntryAsString_(ziplist->at(i).value());
+            auto current = getEntryAsString_((*ziplist)[i]);
             if (current != value) {
                 continue;;
             }
@@ -508,7 +822,7 @@ std::size_t hyper::RedisObject::listRemove(int count, std::string_view value) {
             if ((*it)->asString() == value) {
                 auto current = it--;
                 list.erase(current.get());
-                if (ret++ == count) {
+                if (++ret == count) {
                     return ret;
                 }
             } else {
@@ -567,7 +881,93 @@ void hyper::RedisObject::listTrim(int start, int end) {
         return;
     }
     assert(false);
+}
 
+std::vector<hyper::RedisObjectPtr> hyper::RedisObject::listRange(int start, int end) const {
+    assert(type_ == ObjectType::List);
+    std::size_t len = listLen();
+    if (start < 0) {
+        start += static_cast<int>(len);
+    }
+    if (end < 0) {
+        end += static_cast<int>(len);
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= static_cast<int>(len) || start > end) {
+        return {};
+    }
+    if (end >= static_cast<int>(len)) {
+        end = static_cast<int>(len) - 1;
+    }
+    std::vector<RedisObjectPtr> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (int i = start; i <= end; ++i) {
+            res.emplace_back(createSharedStringObject(getEntryAsString_((*ziplist)[i])));
+        }
+        return res;
+    }
+
+    if (encoding_ == ObjectEncoding::LinkedList) {
+        auto& list = std::get<std::unique_ptr<RedisList>>(data_)->storage;
+        auto it = list.begin();
+        for (int i = 0; i < start; ++i) {
+            ++it;
+        }
+        for (int i = start; i <= end; ++i, ++it) {
+            res.emplace_back(*it);
+        }
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+std::vector<std::string> hyper::RedisObject::listRangeAsStrings(int start, int end) const {
+    assert(type_ == ObjectType::List);
+    std::size_t len = listLen();
+    if (start < 0) {
+        start += static_cast<int>(len);
+    }
+    if (end < 0) {
+        end += static_cast<int>(len);
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= static_cast<int>(len) || start > end) {
+        return {};
+    }
+    if (end >= static_cast<int>(len)) {
+        end = static_cast<int>(len) - 1;
+    }
+
+    std::vector<std::string> res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (int i = start; i <= end; ++i) {
+            res.emplace_back(getEntryAsString_((*ziplist)[static_cast<std::size_t>(i)]));
+        }
+        return res;
+    }
+
+    if (encoding_ == ObjectEncoding::LinkedList) {
+        auto& list = std::get<std::unique_ptr<RedisList>>(data_)->storage;
+        auto it = list.begin();
+        for (int i = 0; i < start; ++i) {
+            ++it;
+        }
+        for (int i = start; i <= end; ++i, ++it) {
+            res.emplace_back((*it)->asString());
+        }
+        return res;
+    }
+
+    assert(false);
+    return res;
 }
 
 bool hyper::RedisObject::setAdd(std::string_view member) {
@@ -660,43 +1060,124 @@ void hyper::RedisObject::setForEach(const std::function<void(std::string_view)>&
     assert(false);
 }
 
+hyper::RedisObjectPtr hyper::RedisObject::setRandomMember() const {
+    assert(type_ == ObjectType::Set);
+    auto member = setRandomMemberString();
+    if (!member.has_value()) {
+        return nullptr;
+    }
+    return createSharedStringObject(*member);
+}
+
+std::optional<std::string> hyper::RedisObject::setRandomMemberString() const {
+    assert(type_ == ObjectType::Set);
+    std::size_t len = setSize();
+    if (len == 0) {
+        return std::nullopt;
+    }
+    if (encoding_ == ObjectEncoding::IntSet) {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_int_distribution<std::size_t> dist(0, len - 1);
+        std::size_t index = dist(gen);
+        return std::to_string(std::get<std::unique_ptr<RedisIntset>>(data_)->getAt(index));
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& hash_set = std::get<std::unique_ptr<RedisSet>>(data_)->storage;
+        if (auto res = hash_set.getRandomKey()) {
+            return *res;
+        }
+        return std::nullopt;
+    }
+    assert(false);
+    return std::nullopt;
+}
+
+hyper::RedisObjectPtr hyper::RedisObject::setPop() {
+    assert(type_ == ObjectType::Set);
+    auto member = setPopString();
+    if (!member.has_value()) {
+        return nullptr;
+    }
+    return createSharedStringObject(*member);
+}
+
+std::optional<std::string> hyper::RedisObject::setPopString() {
+    assert(type_ == ObjectType::Set);
+    if (setSize() == 0) {
+        return std::nullopt;
+    }
+    if (encoding_ == ObjectEncoding::IntSet) {
+        auto member = setRandomMemberString();
+        assert(member.has_value());
+        setRemove(*member);
+        return member;
+    }
+    if (encoding_ == ObjectEncoding::HashTable) {
+        auto& hash_set = std::get<std::unique_ptr<RedisSet>>(data_)->storage;
+        auto rand_k = hash_set.getRandomKey();
+        if (rand_k == nullptr) {
+            return std::nullopt;
+        }
+        std::string res = *rand_k;
+        hash_set.erase(*rand_k);
+        return res;
+    }
+    assert(false);
+    return std::nullopt;
+}
+
 bool hyper::RedisObject::zSetAdd(std::string member, double score) {
+    return zSetAddDetailed(std::move(member), score) == ZSetAddStatus::Added;
+}
+
+hyper::ZSetAddStatus hyper::RedisObject::zSetAddDetailed(std::string member, double score) {
     assert(type_ == ObjectType::ZSet);
+    if (isInvalidScore(score)) {
+        return ZSetAddStatus::InvalidScore;
+    }
 
     if (encoding_ == ObjectEncoding::SkipList) {
         auto& z_set = std::get<std::unique_ptr<RedisZSet>>(data_);
         if (auto old_score = z_set->score.get(member)) {
             if (*old_score == score) {
-                return false;
+                return ZSetAddStatus::Unchanged;
             }
             z_set->order.erase(*old_score, member);
             z_set->order.insert(score, member);
             z_set->score.insertOrAssign(std::move(member), score);
-            return false;
+            return ZSetAddStatus::Updated;
         }
 
         z_set->order.insert(score, member);
         z_set->score.insert(std::move(member), score);
-        return true;
+        return ZSetAddStatus::Added;
     }
 
     if (encoding_ == ObjectEncoding::ZipList) {
         if (member.size() > ZipListMaxValue) {
             convertZSetToSkiplist_();
-            return zSetAdd(std::move(member), score);
+            return zSetAddDetailed(std::move(member), score);
         }
 
         auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
         bool is_update = false;
 
-        auto idx = ziplist->find(member);
-        if (idx.has_value() && idx.value() % 2 == 0) {
-            auto m_idx = idx.value();
+        std::optional<std::size_t> found_idx;
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == member) {
+                found_idx = i;
+                break;
+            }
+        }
+
+        if (found_idx.has_value()) {
+            auto m_idx = found_idx.value();
             auto s_idx = m_idx + 1;
 
-            double old_score = parseScore_(ziplist->at(s_idx).value());
+            double old_score = parseScore_((*ziplist)[s_idx]);
             if (old_score == score) {
-                return false;
+                return ZSetAddStatus::Unchanged;
             }
 
             ziplist->erase(m_idx);
@@ -708,12 +1189,12 @@ bool hyper::RedisObject::zSetAdd(std::string member, double score) {
         const auto size = ziplist->size();
 
         while (pos < size) {
-            double current_score = parseScore_(ziplist->at(pos + 1).value());
+            double current_score = parseScore_((*ziplist)[pos + 1]);
 
             if (current_score < score) {
                 pos += 2;
             } else if (current_score == score) {
-                if (std::string current_member = getEntryAsString_(ziplist->at(pos).value()); current_member < member) {
+                if (std::string current_member = getEntryAsString_((*ziplist)[pos]); current_member < member) {
                     pos += 2;
                 } else {
                     break;
@@ -730,20 +1211,21 @@ bool hyper::RedisObject::zSetAdd(std::string member, double score) {
             convertZSetToSkiplist_();
         }
 
-        return !is_update;
+        return is_update ? ZSetAddStatus::Updated : ZSetAddStatus::Added;
     }
 
     assert(false);
-    return false;
+    return ZSetAddStatus::InvalidScore;
 }
 
 std::optional<double> hyper::RedisObject::zSetScore(std::string_view member) const {
     assert(type_ == ObjectType::ZSet);
     if (encoding_ == ObjectEncoding::ZipList) {
         auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
-        auto res_op = ziplist->find(member);
-        if (res_op.has_value() && res_op.value() % 2 == 0) {
-            return parseScore_(ziplist->at(res_op.value() + 1).value());
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == member) {
+                return parseScore_((*ziplist)[i + 1]);
+            }
         }
         return std::nullopt;
     }
@@ -761,11 +1243,12 @@ bool hyper::RedisObject::zSetRemove(std::string_view member) {
     assert(type_ == ObjectType::ZSet);
     if (encoding_ == ObjectEncoding::ZipList) {
         auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
-        auto res = ziplist->find(member);
-        if (res.has_value() && res.value() % 2 == 0) {
-            ziplist->erase(res.value());
-            ziplist->erase(res.value());
-            return true;
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == member) {
+                ziplist->erase(i);
+                ziplist->erase(i);
+                return true;
+            }
         }
         return false;
     }
@@ -795,13 +1278,14 @@ std::size_t hyper::RedisObject::zSetSize() const {
     return 0;
 }
 
-std::optional<size_t> hyper::RedisObject::zSetRank(std::string_view member) const {
+std::optional<std::size_t> hyper::RedisObject::zSetRank(std::string_view member) const {
     assert(type_ == ObjectType::ZSet);
     if (encoding_ == ObjectEncoding::ZipList) {
         auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
-        auto res = ziplist->find(member);
-        if (res.has_value() && res.value() % 2 == 0) {
-            return res.value() / 2;
+        for (std::size_t i = 0; i < ziplist->size(); i += 2) {
+            if (getEntryAsString_((*ziplist)[i]) == member) {
+                return i / 2;
+            }
         }
         return std::nullopt;
     }
@@ -818,8 +1302,282 @@ std::optional<size_t> hyper::RedisObject::zSetRank(std::string_view member) cons
     return std::nullopt;
 }
 
+std::optional<std::size_t> hyper::RedisObject::zSetRevRank(std::string_view member) const {
+    assert(type_ == ObjectType::ZSet);
+    auto rank = zSetRank(member);
+    if (!rank.has_value()) {
+        return std::nullopt;
+    }
+    return zSetSize() - 1 - rank.value();
+}
+
+std::size_t hyper::RedisObject::zSetCount(const double min, const double max) const {
+    assert(type_ == ObjectType::ZSet);
+    if (isInvalidScore(min) || isInvalidScore(max) || min > max) {
+        return 0;
+    }
+
+    if (encoding_ == ObjectEncoding::ZipList) {
+        std::size_t count{0};
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (int i = 0; i < ziplist->size(); i += 2) {
+            auto score = parseScore_((*ziplist)[i + 1]);
+            if (score >= min && score <= max) {
+                ++count;
+            } else if (score > max) {
+                return count;
+            }
+        }
+
+        return count;
+    }
+    if (encoding_ == ObjectEncoding::SkipList) {
+        auto& skip_list = std::get<std::unique_ptr<RedisZSet>>(data_)->order;
+        ScoreRange<double> range{min, max};
+        auto r1 = skip_list.getRankOfFirstInRange(range);
+        if (r1 == 0) {
+            return 0;
+        }
+        auto r2 = skip_list.getRankOfLastInRange(range);
+        return r2 - r1 + 1;
+    }
+    assert(false);
+    return 0;
+}
+
+hyper::RedisObject::ZSetRangeResult hyper::RedisObject::zSetRange(int start, int end) const {
+    assert(type_ == ObjectType::ZSet);
+    ZSetRangeResult res{};
+    std::size_t len = zSetSize();
+    if (start < 0) {
+        start += static_cast<int>(len);
+    }
+    if (end < 0) {
+        end += static_cast<int>(len);
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= static_cast<int>(len) || start > end) {
+        return {};
+    }
+    if (end >= static_cast<int>(len)) {
+        end = static_cast<int>(len) - 1;
+    }
+
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = start; i <= end; ++i) {
+            std::string member = getEntryAsString_((*ziplist)[2 * i]);
+            double score = parseScore_((*ziplist)[2 * i + 1]);
+            res.emplace_back(std::move(member), score);
+        }
+        return res;
+    }
+
+    if (encoding_ == ObjectEncoding::SkipList) {
+        auto& skip_list = std::get<std::unique_ptr<RedisZSet>>(data_)->order;
+        skip_list.forEachByRank(
+            static_cast<std::size_t>(start) + 1,
+            static_cast<std::size_t>(end - start + 1),
+            [&res](const double& score, const std::string& member) {
+                res.emplace_back(member, score);
+            });
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+hyper::RedisObject::ZSetRangeResult hyper::RedisObject::zSetRevRange(int start, int end) const {
+    assert(type_ == ObjectType::ZSet);
+    std::size_t len = zSetSize();
+    if (start < 0) {
+        start += static_cast<int>(len);
+    }
+    if (end < 0) {
+        end += static_cast<int>(len);
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= static_cast<int>(len) || start > end) {
+        return {};
+    }
+    if (end >= static_cast<int>(len)) {
+        end = static_cast<int>(len) - 1;
+    }
+    ZSetRangeResult res{};
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        for (std::size_t i = start; i <= end; ++i) {
+            auto index = len - 1 - i;
+            std::string member = getEntryAsString_((*ziplist)[2 * index]);
+            double score = parseScore_((*ziplist)[2 * index + 1]);
+            res.emplace_back(std::move(member), score);
+        }
+        return res;
+    }
+    if (encoding_ == ObjectEncoding::SkipList) {
+        auto& skip_list = std::get<std::unique_ptr<RedisZSet>>(data_)->order;
+        skip_list.forEachReverseByRank(
+            len - static_cast<std::size_t>(start),
+            static_cast<std::size_t>(end - start + 1),
+            [&res](const double& score, const std::string& member) {
+                res.emplace_back(member, score);
+            });
+        return res;
+    }
+
+    assert(false);
+    return res;
+}
+
+double hyper::RedisObject::zSetIncrBy(std::string member, double increment) {
+    assert(type_ == ObjectType::ZSet);
+    auto result = zSetIncrByChecked(std::move(member), increment);
+    assert(result.has_value());
+    return result.value_or(std::numeric_limits<double>::quiet_NaN());
+}
+
+std::optional<double> hyper::RedisObject::zSetIncrByChecked(std::string member, double increment) {
+    assert(type_ == ObjectType::ZSet);
+    if (isInvalidScore(increment)) {
+        return std::nullopt;
+    }
+    double old_score{};
+    auto res = zSetScore(member);
+    if (res.has_value()) {
+        old_score += res.value();
+    }
+    double new_score = old_score + increment;
+    if (isInvalidScore(new_score)) {
+        return std::nullopt;
+    }
+    if (zSetAddDetailed(std::move(member), new_score) == ZSetAddStatus::InvalidScore) {
+        return std::nullopt;
+    }
+    return new_score;
+}
+
+std::size_t hyper::RedisObject::zSetRemoveRangeByRank(int start, int end) {
+    assert(type_ == ObjectType::ZSet);
+    std::size_t len = zSetSize();
+    if (start < 0) {
+        start += static_cast<int>(len);
+    }
+    if (end < 0) {
+        end += static_cast<int>(len);
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= static_cast<int>(len) || start > end) {
+        return 0;
+    }
+    if (end >= static_cast<int>(len)) {
+        end = static_cast<int>(len) - 1;
+    }
+
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        const auto removed_count = static_cast<std::size_t>(end - start + 1);
+        return ziplist->eraseRange(static_cast<std::size_t>(start) * 2, removed_count * 2) / 2;
+    }
+
+    if (encoding_ == ObjectEncoding::SkipList) {
+        auto& z_set = std::get<std::unique_ptr<RedisZSet>>(data_);
+        return z_set->order.eraseRangeByRank(
+            static_cast<std::size_t>(start) + 1,
+            static_cast<std::size_t>(end) + 1,
+            [&z_set](const double&, const std::string& member) {
+                z_set->score.erase(member);
+            });
+    }
+
+    assert(false);
+    return 0;
+}
+
+std::size_t hyper::RedisObject::zSetRemoveRangeByScore(double min, double max) {
+    assert(type_ == ObjectType::ZSet);
+    if (isInvalidScore(min) || isInvalidScore(max) || min > max) {
+        return 0;
+    }
+
+    if (encoding_ == ObjectEncoding::ZipList) {
+        auto& ziplist = std::get<std::unique_ptr<RedisZiplist>>(data_);
+        std::size_t entry_index{0};
+        std::size_t first_entry{0};
+        std::size_t entries_to_remove{0};
+        bool found_range = false;
+        bool past_range = false;
+
+        ziplist->forEach([&](const ziplistEntryView& entry) {
+            if (past_range) {
+                ++entry_index;
+                return;
+            }
+
+            if (entry_index % 2 == 1) {
+                double score = parseScore_(entry);
+                if (!found_range) {
+                    if (score > max) {
+                        past_range = true;
+                    } else if (score >= min) {
+                        found_range = true;
+                        first_entry = entry_index - 1;
+                        entries_to_remove = 2;
+                    }
+                } else if (score > max) {
+                    past_range = true;
+                } else {
+                    entries_to_remove += 2;
+                }
+            }
+
+            ++entry_index;
+        });
+
+        if (!found_range) {
+            return 0;
+        }
+        return ziplist->eraseRange(first_entry, entries_to_remove) / 2;
+    }
+
+    if (encoding_ == ObjectEncoding::SkipList) {
+        ScoreRange<double> range{min, max};
+        auto& z_set = std::get<std::unique_ptr<RedisZSet>>(data_);
+        return z_set->order.eraseRangeByScore(
+            range,
+            [&z_set](const double&, const std::string& member) {
+                z_set->score.erase(member);
+            });
+    }
+
+    assert(false);
+    return 0;
+}
+
 bool hyper::RedisObject::shouldConvertZiplistToList_(std::string_view value, std::size_t next_size) noexcept {
     return next_size > ZipListMaxEntries || value.size() > ZipListMaxValue;
+}
+
+
+void hyper::RedisObject::convertHashZipListToDict_() {
+    assert(type_ == ObjectType::Hash && encoding_ == ObjectEncoding::ZipList);
+
+    auto dict = std::make_unique<RedisDict>();
+    auto ziplist = std::move(std::get<std::unique_ptr<RedisZiplist>>(data_));
+    for (int i = 0; i < ziplist->size(); i += 2) {
+        std::string field = getEntryAsString_((*ziplist)[i]);
+        RedisObjectPtr value = createSharedStringObject(getEntryAsString_((*ziplist)[i + 1]));
+        dict->storage.insert(std::move(field), std::move(value));
+    }
+
+    encoding_ = ObjectEncoding::HashTable;
+    data_ = std::move(dict);
 }
 
 void hyper::RedisObject::convertZiplistToList_() {
@@ -829,9 +1587,9 @@ void hyper::RedisObject::convertZiplistToList_() {
     auto& new_list_storage = new_list->storage;
     current_list->forEach([&new_list_storage](const ziplistEntryView& value) {
         if (value.isInteger()) {
-            new_list_storage.pushBack(createLongObject(value.integer()));
+            new_list_storage.pushBack(createSharedLongObject(value.integer()));
         } else if (value.isString()) {
-            new_list_storage.pushBack(createStringObject(value.string()));
+            new_list_storage.pushBack(createSharedStringObject(value.string()));
         }
     });
     encoding_ = ObjectEncoding::LinkedList;
