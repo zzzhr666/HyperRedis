@@ -430,12 +430,12 @@ namespace hyper {
                 return v;
             }
             if (encoding_byte == Int24Marker) {
-                std::int32_t v{0};
-                std::memcpy(&v, entries_.data() + offset, 3);
-                if (v & 0x800000) {
-                    v |= 0xFF000000;
+                const auto* ptr = entries_.data() + offset;
+                std::uint32_t u = static_cast<std::uint32_t>(ptr[0]) | (static_cast<std::uint32_t>(ptr[1])<<8) | (static_cast<std::uint32_t>(ptr[2] )<< 16);
+                if (u & 0x800000u) {
+                    return static_cast<std::int32_t>(u) - static_cast<std::int32_t>(0x1000000);
                 }
-                return v;
+                return static_cast<std::int32_t>(u);
             }
 
             if (encoding_byte == Int32Marker) {

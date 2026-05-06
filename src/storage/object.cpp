@@ -765,7 +765,7 @@ std::size_t hyper::RedisObject::listRemove(int count, std::string_view value) {
     std::size_t ret{0};
     auto len = listLen();
     if (count == 0) {
-        count = len;
+        count = static_cast<int>(len);
     }
     bool from_front = count > 0;
     count = std::abs(count);
@@ -787,7 +787,7 @@ std::size_t hyper::RedisObject::listRemove(int count, std::string_view value) {
             }
             return ret;
         }
-        for (int i = len - 1; i >= 0; --i) {
+        for (int i = static_cast<int>(len) - 1; i >= 0; --i) {
             auto current = getEntryAsString_((*ziplist)[i]);
             if (current != value) {
                 continue;;
@@ -856,7 +856,7 @@ void hyper::RedisObject::listTrim(int start, int end) {
         return;
     }
     if (static_cast<std::size_t>(end) >= len) {
-        end = len - 1;
+        end = static_cast<int>(len )- 1;
     }
     std::size_t ltrim = start;
     std::size_t rtrim = len - (end + 1);
