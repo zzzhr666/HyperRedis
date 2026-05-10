@@ -2,12 +2,15 @@
 
 
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <optional>
+#include <vector>
 
 #include "hyper/datastructures/dict.hpp"
 #include "hyper/storage/object.hpp"
@@ -60,6 +63,25 @@ namespace hyper {
         std::optional<ObjectType> type(std::string_view key, ExpireTimePoint now);
 
         bool rename(std::string_view old_key,std::string_view new_key,ExpireTimePoint now);
+
+        void clear();
+
+        std::optional<std::string> randomKey(ExpireTimePoint now);
+
+        template<typename FUNC>
+        requires std::invocable<FUNC,std::string_view,const RedisObjectPtr&>
+        void forEach(ExpireTimePoint now,FUNC&& callback) {
+            std::vector<std::string> keys;
+            main_dict_.forEach([&keys](const std::string& key,const RedisObjectPtr&) {
+                keys.push_back(key);
+            });
+
+            for (const auto& key : keys) {
+                if (auto value = get(key,now)) {
+                    callback(key,value);
+                }
+            }
+        }
 
         ~RedisDb();
 

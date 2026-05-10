@@ -7,7 +7,7 @@ namespace {
         return std::chrono::duration_cast<hyper::Milliseconds>(time.time_since_epoch()).count();
     }
 
-    hyper::ExpireTimePoint fromUnixMilliseconds(hyper::UnixMilliseconds ms) {
+    [[maybe_unused]] hyper::ExpireTimePoint fromUnixMilliseconds(hyper::UnixMilliseconds ms) {
         return hyper::ExpireTimePoint(hyper::Milliseconds(ms));
     }
 }
@@ -45,44 +45,37 @@ bool hyper::RedisDb::expireAt(std::string_view key, ExpireTimePoint now, ExpireT
         return false;
     }
 
-    // case: key存在
+    const auto new_deadline = toUnixMilliseconds(deadline);
+    bool allowed = false;
 
     if (condition == ExpireCondition::Always) {
-        expire_dict_.insertOrAssign(std::string(key), toUnixMilliseconds(deadline));
-        return true;
-    }
-    if (condition == ExpireCondition::NX) {
-        if (expire_dict_.contains(key)) {
-            return false;
-        }
-        expire_dict_.insert(std::string(key), toUnixMilliseconds(deadline));
-        return true;
-    }
-    if (condition == ExpireCondition::XX) {
-        if (!expire_dict_.contains(key)) {
-            return false;
-        }
-        expire_dict_.insertOrAssign(std::string(key), toUnixMilliseconds(deadline));
-        return true;
-    }
-    if (condition == ExpireCondition::GT || condition == ExpireCondition::LT) {
+        allowed = true;
+    } else if (condition == ExpireCondition::NX) {
+        allowed = !expire_dict_.contains(key);
+    } else if (condition == ExpireCondition::XX) {
+        allowed = expire_dict_.contains(key);
+    } else if (condition == ExpireCondition::GT || condition == ExpireCondition::LT) {
         UnixMilliseconds original = std::numeric_limits<UnixMilliseconds>::max();
         if (auto res = expire_dict_.get(key); res != nullptr) {
             original = *res;
         }
-        UnixMilliseconds new_deadline = toUnixMilliseconds(deadline);
-        if (condition == ExpireCondition::GT && original < new_deadline) {
-            expire_dict_.insertOrAssign(std::string(key), new_deadline);
-            return true;
-        }
-        if (condition == ExpireCondition::LT && original > new_deadline) {
-            expire_dict_.insertOrAssign(std::string(key), new_deadline);
-            return true;
-        }
+        allowed = condition == ExpireCondition::GT
+            ? original < new_deadline
+            : original > new_deadline;
+    } else {
+        assert(false);
+    }
+
+    if (!allowed) {
         return false;
     }
-    assert(false);
-    return false;
+    if (deadline <= now) {
+        del(key);
+        return true;
+    }
+
+    expire_dict_.insertOrAssign(std::string(key), new_deadline);
+    return true;
 }
 
 bool hyper::RedisDb::expireAfter(std::string_view key, Milliseconds ttl, ExpireTimePoint now,
@@ -95,7 +88,7 @@ hyper::UnixMilliseconds hyper::RedisDb::pttl(std::string_view key, ExpireTimePoi
     if (!main_dict_.contains(key)) {
         return -2;
     }
-    if (auto res = expire_dict_.get(key)) {
+    if (const auto res = expire_dict_.get(key)) {
         return *res - toUnixMilliseconds(now);
     }
     return -1;
@@ -166,6 +159,26 @@ bool hyper::RedisDb::rename(std::string_view old_key, std::string_view new_key, 
         return true;
     }
     return false;
+}
+
+void hyper::RedisDb::clear() {
+    main_dict_.clear();
+    expire_dict_.clear();
+}
+
+std::optional<std::string> hyper::RedisDb::randomKey(ExpireTimePoint now) {
+    while (!main_dict_.empty()) {
+        if (const auto key = main_dict_.getRandomKey()) {
+            std::string key_copy = *key;
+            if (!expireIfNeeded_(key_copy, now)) {
+                return key_copy;
+            }
+            continue;
+        }
+        return std::nullopt;
+    }
+
+    return std::nullopt;
 }
 
 

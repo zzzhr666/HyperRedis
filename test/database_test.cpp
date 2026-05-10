@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "hyper/storage/database.hpp"
 
 using namespace hyper;
@@ -69,6 +73,58 @@ TEST(DatabaseTest, ExpireAfterUsesRelativeDuration) {
 
     EXPECT_NE(db.get("key", now + Milliseconds{24}), nullptr);
     EXPECT_EQ(db.get("key", now + Milliseconds{25}), nullptr);
+}
+
+TEST(DatabaseTest, ExpireWithNonPositiveTtlDeletesKeyImmediately) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("zero", RedisObject::createSharedStringObject("value"));
+    EXPECT_TRUE(db.expireAfter("zero", Milliseconds{0}, now));
+    EXPECT_EQ(db.size(), 0);
+    EXPECT_FALSE(db.exists("zero", now));
+    EXPECT_EQ(db.pttl("zero", now), -2);
+
+    db.set("negative", RedisObject::createSharedStringObject("value"));
+    EXPECT_TRUE(db.expireAfter("negative", Milliseconds{-1}, now));
+    EXPECT_EQ(db.size(), 0);
+    EXPECT_FALSE(db.exists("negative", now));
+    EXPECT_EQ(db.pttl("negative", now), -2);
+}
+
+TEST(DatabaseTest, ExpireAtPastDeadlineDeletesKeyImmediately) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("key", RedisObject::createSharedStringObject("value"));
+
+    EXPECT_TRUE(db.expireAt("key", now, now - Milliseconds{1}));
+    EXPECT_EQ(db.size(), 0);
+    EXPECT_EQ(db.get("key", now), nullptr);
+    EXPECT_EQ(db.pttl("key", now), -2);
+}
+
+TEST(DatabaseTest, ExpireConditionsAreCheckedBeforeImmediateDelete) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("nx", RedisObject::createSharedStringObject("value"));
+    EXPECT_TRUE(db.expireAfter("nx", Milliseconds{0}, now, RedisDb::ExpireCondition::NX));
+    EXPECT_FALSE(db.exists("nx", now));
+
+    db.set("xx", RedisObject::createSharedStringObject("value"));
+    EXPECT_FALSE(db.expireAfter("xx", Milliseconds{0}, now, RedisDb::ExpireCondition::XX));
+    EXPECT_TRUE(db.exists("xx", now));
+    EXPECT_EQ(db.pttl("xx", now), -1);
+
+    db.set("gt", RedisObject::createSharedStringObject("value"));
+    EXPECT_FALSE(db.expireAfter("gt", Milliseconds{0}, now, RedisDb::ExpireCondition::GT));
+    EXPECT_TRUE(db.exists("gt", now));
+    EXPECT_EQ(db.pttl("gt", now), -1);
+
+    db.set("lt", RedisObject::createSharedStringObject("value"));
+    EXPECT_TRUE(db.expireAfter("lt", Milliseconds{0}, now, RedisDb::ExpireCondition::LT));
+    EXPECT_FALSE(db.exists("lt", now));
 }
 
 TEST(DatabaseTest, ExpireReturnsFalseForMissingOrAlreadyExpiredKey) {
@@ -316,6 +372,39 @@ TEST(DatabaseTest, RenameMovesExpirationToNewKey) {
     EXPECT_EQ(db.size(), 0);
 }
 
+TEST(DatabaseTest, RenameSameKeyIsNoOpAndKeepsExpiration) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("key", RedisObject::createSharedStringObject("value"));
+    EXPECT_TRUE(db.expireAfter("key", Milliseconds{100}, now));
+
+    EXPECT_TRUE(db.rename("key", "key", now + Milliseconds{10}));
+
+    EXPECT_EQ(db.size(), 1);
+    EXPECT_TRUE(db.exists("key", now + Milliseconds{10}));
+    EXPECT_EQ(db.pttl("key", now + Milliseconds{10}), 90);
+    EXPECT_EQ(db.get("key", now + Milliseconds{10})->asString(), "value");
+}
+
+TEST(DatabaseTest, RenameOverwrittenDestinationInheritsSourceExpiration) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("old", RedisObject::createSharedStringObject("old-value"));
+    db.set("new", RedisObject::createSharedStringObject("new-value"));
+    EXPECT_TRUE(db.expireAfter("old", Milliseconds{100}, now));
+    EXPECT_TRUE(db.expireAfter("new", Milliseconds{10}, now));
+
+    EXPECT_TRUE(db.rename("old", "new", now + Milliseconds{5}));
+
+    EXPECT_FALSE(db.exists("old", now + Milliseconds{5}));
+    EXPECT_EQ(db.pttl("new", now + Milliseconds{5}), 95);
+    EXPECT_EQ(db.get("new", now + Milliseconds{10})->asString(), "old-value");
+    EXPECT_EQ(db.get("new", now + Milliseconds{100}), nullptr);
+    EXPECT_EQ(db.size(), 0);
+}
+
 TEST(DatabaseTest, RenameOverwritesDestinationAndReplacesItsExpiration) {
     RedisDb db;
     const auto now = makeTime(1'000);
@@ -347,4 +436,74 @@ TEST(DatabaseTest, RenameReturnsFalseForMissingOrExpiredSource) {
     EXPECT_FALSE(db.rename("old", "new", now + Milliseconds{10}));
     EXPECT_FALSE(db.exists("old", now + Milliseconds{10}));
     EXPECT_FALSE(db.exists("new", now + Milliseconds{10}));
+}
+
+TEST(DatabaseTest, ClearRemovesValuesAndExpirations) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("plain", RedisObject::createSharedStringObject("value"));
+    db.set("volatile", RedisObject::createSharedStringObject("expires"));
+    EXPECT_TRUE(db.expireAfter("volatile", Milliseconds{100}, now));
+
+    db.clear();
+
+    EXPECT_EQ(db.size(), 0);
+    EXPECT_EQ(db.get("plain", now), nullptr);
+    EXPECT_EQ(db.get("volatile", now), nullptr);
+    EXPECT_EQ(db.pttl("volatile", now), -2);
+    EXPECT_EQ(db.randomKey(now), std::nullopt);
+}
+
+TEST(DatabaseTest, RandomKeyReturnsOnlyLiveKeys) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("expired", RedisObject::createSharedStringObject("expired"));
+    db.set("live", RedisObject::createSharedStringObject("live"));
+    EXPECT_TRUE(db.expireAfter("expired", Milliseconds{10}, now));
+
+    const auto key = db.randomKey(now + Milliseconds{10});
+
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(*key, "live");
+}
+
+TEST(DatabaseTest, RandomKeyReturnsNulloptForEmptyOrOnlyExpiredDb) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    EXPECT_EQ(db.randomKey(now), std::nullopt);
+
+    db.set("a", RedisObject::createSharedStringObject("1"));
+    db.set("b", RedisObject::createSharedStringObject("2"));
+    EXPECT_TRUE(db.expireAfter("a", Milliseconds{10}, now));
+    EXPECT_TRUE(db.expireAfter("b", Milliseconds{10}, now));
+
+    EXPECT_EQ(db.randomKey(now + Milliseconds{10}), std::nullopt);
+    EXPECT_EQ(db.size(), 0);
+}
+
+TEST(DatabaseTest, ForEachVisitsOnlyLiveKeys) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    db.set("a", RedisObject::createSharedStringObject("1"));
+    db.set("b", RedisObject::createSharedStringObject("2"));
+    db.set("expired", RedisObject::createSharedStringObject("expired"));
+    EXPECT_TRUE(db.expireAfter("expired", Milliseconds{10}, now));
+
+    std::vector<std::pair<std::string, std::string>> visited;
+    db.forEach(now + Milliseconds{10},
+               [&visited](std::string_view key, const RedisObjectPtr& value) {
+                   visited.emplace_back(std::string(key), value->asString());
+               });
+
+    std::sort(visited.begin(), visited.end());
+
+    ASSERT_EQ(visited.size(), 2);
+    EXPECT_EQ(visited[0], std::make_pair(std::string("a"), std::string("1")));
+    EXPECT_EQ(visited[1], std::make_pair(std::string("b"), std::string("2")));
+    EXPECT_EQ(db.size(), 2);
+    EXPECT_FALSE(db.exists("expired", now + Milliseconds{10}));
 }
