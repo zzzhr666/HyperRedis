@@ -2,7 +2,7 @@
 
 `HyperRedis` 是一个为了配合阅读《Redis设计与实现（第二版）》而手写搭建的简易版 Redis 项目。
 
-当前阶段先聚焦不带服务器的核心部分，核心库命名为 `HyperRedisCore`；未来在接入服务器实现后，再以 `HyperRedis` 作为完整系统的名称。
+当前阶段仍以核心库 `HyperRedisCore` 为主；核心库现在包含底层数据结构、存储对象模型、数据库管理和不依赖网络层的命令执行核心。未来接入 Muduo 网络层和完整服务器目标后，再以 `HyperRedis` 作为完整系统的名称。
 
 项目的第一目标是学习和理解 Redis 的整体设计、对象模型与关键数据结构，而不是在当前阶段追求工业级可用性。
 
@@ -81,7 +81,9 @@ src/
 
 ## 服务器计划
 
-服务器部分后续计划基于 Muduo 搭建，但当前阶段还不会引入 Muduo，也不会在构建系统中接入服务器目标。
+服务器目录当前已经放入不依赖网络层的核心组件，包括 `RespValue`、`RedisClientContext` 和 `CommandExecutor`，并已随 `HyperRedisCore` 一起构建。当前仍没有独立的 Redis 网络服务器目标，也没有引入 Muduo。
+
+后续服务器部分计划基于 Muduo 搭建，届时再补齐 RESP 解析/序列化、连接管理、事件循环和完整的可执行服务器目标。
 
 ## 日志方案
 
@@ -123,7 +125,7 @@ src/
 
 ## 当前状态
 
-仓库已经完成对象层和底层数据结构的第一轮较大重构，当前重点是为后续 `redisDb` 和命令层打地基。
+仓库已经完成对象层、底层数据结构、数据库管理和第一轮命令执行核心。当前重点已经从“为 DB 和命令层打地基”推进到“补齐更多 Redis 命令语义，并为后续网络服务器接入做准备”。
 
 目前已经完成的内容：
 
@@ -138,15 +140,29 @@ src/
   - String 增加了溢出检查和浮点非法值处理。
   - Hash/List/Set/ZSet 都提供了更适合 DB 层调用的结果接口。
   - ZSet 现在区分新增、更新、无变化和非法 score，且 ziplist / skiplist 两种编码的行为已对齐。
+- **数据库层**：
+  - `RedisDb` 已实现主字典与过期字典，支持 `set/get/del/exists/type` 等基础访问。
+  - 已实现 TTL/PTTL、PERSIST、惰性过期、主动过期周期、随机 key、rename 和清库能力。
+  - `EXPIRE` / `PEXPIRE` 支持 `NX`、`XX`、`GT`、`LT` 条件选项。
+  - `RedisManager` 已支持多 DB 管理、按索引访问、单库清空和全库清空。
+- **命令执行核心**：
+  - 已引入 `RespValue` 作为命令返回值模型。
+  - 已引入 `RedisClientContext` 保存客户端当前 DB 选择状态。
+  - `CommandExecutor` 已支持命令大小写归一、参数数量校验、命令分发表和 Redis 风格错误返回。
+  - 已实现 `PING`、`SELECT`、`SET`、`GET`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`。
+  - 已实现 `DBSIZE`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX`。
+  - 已实现 String 相关的 `MGET`、`MSET`、`STRLEN`、`APPEND`、`INCR`、`DECR`、`INCRBY`、`INCRBYFLOAT`。
+  - List/Hash/Set/ZSet 的命令分发入口已经预留，后续继续补齐具体命令语义。
 - **测试**：
   - 已接入 GoogleTest，测试目录位于 `test/`。
-  - 当前已有 160 个测试全部通过，覆盖基础结构、编码切换、对象行为和 Redis 可见语义。
+  - 当前测试覆盖基础结构、编码切换、对象行为、DB 行为、命令执行器和 Redis 可见语义。
   - 新增了 `redis_object_redis_behavior_test.cpp`，专门对照 Redis 的外部行为做回归验证。
+  - 新增了 `database_test.cpp`、`redis_manager_test.cpp`、`client_context_test.cpp` 和 `command_executor_test.cpp`，覆盖 DB、客户端上下文和命令层行为。
 
 ## 接下来的重点
 
-- `redisDb`：实现多数据库管理、主字典与过期字典。
-- 命令层：把对象层暴露的能力收敛成 Redis 命令语义。
-- 过期策略：实现惰性删除与定期删除。
+- 命令层：继续补齐 List/Hash/Set/ZSet 的 Redis 命令语义。
+- RESP：补齐请求解析和响应序列化，让命令执行器可以接入真实连接。
+- 过期策略：继续打磨惰性删除与定期删除的调度策略。
 - 持久化：初步探索 RDB 快照的 save/load。
-- 服务器接入：后续再接 Muduo 和网络层。
+- 服务器接入：后续接入 Muduo 和网络层，形成完整 Redis-like 服务。

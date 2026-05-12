@@ -331,3 +331,196 @@ TEST(CommandExecutorTest, ExpireRejectsInvalidTimeouts) {
     expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"PEXPIRE", "key", "12.5"}),
                 "ERR value is not an integer or out of range");
 }
+
+TEST(CommandExecutorTest, ExpireSupportsConditionOptions) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    auto* db = client.currentDb(manager);
+    ASSERT_NE(db, nullptr);
+
+    const auto now = makeTime(1'000);
+
+    db->set("key", RedisObject::createSharedStringObject("value"));
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"EXPIRE", "key", "10", "NX"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  10'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"EXPIRE", "key", "20", "NX"}, now),
+                  0);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  10'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"EXPIRE", "key", "20", "XX"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  20'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"PEXPIRE", "key", "20", "XX"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  20);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"PEXPIRE", "key", "25", "GT"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  25);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"PEXPIRE", "key", "20", "gt"}, now),
+                  0);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  25);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"PEXPIRE", "key", "20", "lt"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  20);
+}
+
+TEST(CommandExecutorTest, ExpireRejectsInvalidConditionOptionWithoutChangingTtl) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    auto* db = client.currentDb(manager);
+    ASSERT_NE(db, nullptr);
+
+    const auto now = makeTime(1'000);
+
+    db->set("key", RedisObject::createSharedStringObject("value"));
+    ASSERT_TRUE(db->expireAfter("key", Milliseconds{1'000}, now));
+
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"EXPIRE", "key", "10", "BAD"}, now),
+                "ERR syntax error");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "key"}, now),
+                  1'000);
+}
+
+TEST(CommandExecutorTest, IncrByFloatReportsPreciseFloatErrors) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    auto* db = client.currentDb(manager);
+    ASSERT_NE(db, nullptr);
+
+    const auto now = makeTime(1'000);
+
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 3>{"INCRBYFLOAT", "missing", "not-a-float"}, now),
+                "ERR value is not a valid float");
+
+    db->set("not-float", RedisObject::createSharedStringObject("not-a-float"));
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 3>{"INCRBYFLOAT", "not-float", "1.5"}, now),
+                "ERR value is not a valid float");
+
+    db->set("huge", RedisObject::createSharedStringObject("1e308"));
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 3>{"INCRBYFLOAT", "huge", "1e308"}, now),
+                "ERR increment would produce NaN or Infinity");
+}
+
+TEST(CommandExecutorTest, DbSizeReportsCurrentDbKeyCount) {
+    CommandExecutor executor;
+    RedisManager manager(2);
+    RedisClientContext client;
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "one", "1"}), "OK");
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "two", "2"}), "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 2);
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"SELECT", "1"}), "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 0);
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "other", "value"}), "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 1);
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"SELECT", "0"}), "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 2);
+}
+
+TEST(CommandExecutorTest, FlushDbClearsOnlyCurrentDb) {
+    CommandExecutor executor;
+    RedisManager manager(2);
+    RedisClientContext client;
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "key", "db0"}), "OK");
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"SELECT", "1"}), "OK");
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "key", "db1"}), "OK");
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 1>{"FLUSHDB"}), "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 0);
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "key"}));
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"SELECT", "0"}), "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 1);
+    expectBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "key"}), "db0");
+}
+
+TEST(CommandExecutorTest, FlushAllClearsEveryDb) {
+    CommandExecutor executor;
+    RedisManager manager(2);
+    RedisClientContext client;
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "key", "db0"}), "OK");
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"SELECT", "1"}), "OK");
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "key", "db1"}), "OK");
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 1>{"FLUSHALL"}), "OK");
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "key"}));
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"SELECT", "0"}), "OK");
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "key"}));
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 1>{"DBSIZE"}), 0);
+}
+
+TEST(CommandExecutorTest, RandomKeyReturnsLiveKeyOrNullBulk) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    auto* db = client.currentDb(manager);
+    ASSERT_NE(db, nullptr);
+
+    const auto now = makeTime(1'000);
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 1>{"RANDOMKEY"}, now));
+
+    db->set("expired", RedisObject::createSharedStringObject("expired"));
+    db->set("live", RedisObject::createSharedStringObject("live"));
+    ASSERT_TRUE(db->expireAfter("expired", Milliseconds{10}, now));
+
+    expectBulkString(execute(executor, manager, client, std::array<std::string_view, 1>{"RANDOMKEY"},
+                             now + Milliseconds{10}),
+                     "live");
+}
+
+TEST(CommandExecutorTest, RenameMovesKeyAndReportsMissingSource) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"RENAME", "missing", "new"}, now),
+                "ERR no such key");
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "old", "value"}, now),
+                       "OK");
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"SET", "new", "overwritten"},
+                               now),
+                       "OK");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 3>{"PEXPIRE", "old", "25"}, now),
+                  1);
+
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 3>{"RENAME", "old", "new"}, now),
+                       "OK");
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "old"}, now));
+    expectBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "new"}, now), "value");
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "new"}, now), 25);
+}
