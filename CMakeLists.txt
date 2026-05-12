@@ -9,164 +9,70 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(spdlog REQUIRED)
 find_package(GTest REQUIRED)
 
-
 set(STORAGE_ENGINE_SOURCES
         src/storage/object.cpp
         src/storage/database.cpp
+        src/storage/redis_manager.cpp
 )
 
-set(SERVER_SOURCES
-    # src/server/server.cpp
-    # src/server/connection.cpp
+set(SERVER_CORE_SOURCES
+        src/server/client_context.cpp
+        src/server/command_executor.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
-    ${STORAGE_ENGINE_SOURCES}
+        ${STORAGE_ENGINE_SOURCES}
+        ${SERVER_CORE_SOURCES}
 )
 
-if (HYPERREDIS_CORE_SOURCES)
-    add_library(HyperRedisCore STATIC ${HYPERREDIS_CORE_SOURCES})
-    target_include_directories(HyperRedisCore
+add_library(HyperRedisCore STATIC
+        ${HYPERREDIS_CORE_SOURCES}
+)
+
+target_include_directories(HyperRedisCore
         PUBLIC
-            ${PROJECT_SOURCE_DIR}/include
-    )
-    target_link_libraries(HyperRedisCore
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(HyperRedisCore
         PUBLIC
-            spdlog::spdlog
-    )
-else ()
-    add_library(HyperRedisCore INTERFACE)
-    target_include_directories(HyperRedisCore
-        INTERFACE
-            ${PROJECT_SOURCE_DIR}/include
-    )
-    target_link_libraries(HyperRedisCore
-        INTERFACE
-            spdlog::spdlog
-    )
-    message(STATUS "HyperRedisCore is configured as an interface placeholder until core source files are added.")
-endif ()
+        spdlog::spdlog
+)
 
 enable_testing()
-
-add_executable(linked_list_test
-    test/linked_list_test.cpp
-)
-
-target_link_libraries(linked_list_test
-    PRIVATE
-        GTest::gtest
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(dict_test
-    test/dict_test.cpp
-)
-
-target_link_libraries(dict_test
-    PRIVATE
-        GTest::gtest
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(skip_list_test
-    test/skip_list_test.cpp
-)
-
-target_link_libraries(skip_list_test
-    PRIVATE
-        GTest::gtest
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(intset_test
-    test/intset_test.cpp
-)
-
-target_link_libraries(intset_test
-    PRIVATE
-        GTest::gtest
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(ziplist_test
-    test/ziplist_test.cpp
-)
-
-target_link_libraries(ziplist_test
-    PRIVATE
-        GTest::gtest_main
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(object_test
-    test/object_test.cpp
-)
-
-target_link_libraries(object_test
-    PRIVATE
-        GTest::gtest_main
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(zset_test
-    test/zset_test.cpp
-)
-
-target_link_libraries(zset_test
-    PRIVATE
-        GTest::gtest_main
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(object_stress_test
-    test/object_stress_test.cpp
-)
-
-target_link_libraries(object_stress_test
-    PRIVATE
-        GTest::gtest_main
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(redis_object_redis_behavior_test
-    test/redis_object_redis_behavior_test.cpp
-)
-
-target_link_libraries(redis_object_redis_behavior_test
-    PRIVATE
-        GTest::gtest_main
-        HyperRedisCore
-        spdlog::spdlog
-)
-
-add_executable(database_test
-    test/database_test.cpp
-)
-
-target_link_libraries(database_test
-    PRIVATE
-        GTest::gtest_main
-        HyperRedisCore
-        spdlog::spdlog
-)
-
 include(GoogleTest)
-gtest_discover_tests(linked_list_test)
-gtest_discover_tests(dict_test)
-gtest_discover_tests(skip_list_test)
-gtest_discover_tests(intset_test)
-gtest_discover_tests(ziplist_test)
-gtest_discover_tests(object_test)
-gtest_discover_tests(zset_test)
-gtest_discover_tests(object_stress_test)
-gtest_discover_tests(redis_object_redis_behavior_test)
-gtest_discover_tests(database_test)
+
+function(add_hyperredis_test target)
+    add_executable(${target}
+            test/${target}.cpp
+    )
+
+    target_link_libraries(${target}
+            PRIVATE
+            HyperRedisCore
+            GTest::gtest_main
+            spdlog::spdlog
+    )
+
+    gtest_discover_tests(${target})
+endfunction()
+
+set(HYPERREDIS_TESTS
+        linked_list_test
+        dict_test
+        skip_list_test
+        intset_test
+        ziplist_test
+        object_test
+        zset_test
+        object_stress_test
+        redis_object_redis_behavior_test
+        database_test
+    redis_manager_test
+    client_context_test
+    command_executor_test
+)
+
+foreach (test_target IN LISTS HYPERREDIS_TESTS)
+    add_hyperredis_test(${test_target})
+endforeach ()

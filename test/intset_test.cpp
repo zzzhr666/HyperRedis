@@ -238,15 +238,3 @@ TEST(IntsetTest, EraseHeadMiddleAndTailPreservesOrder) {
     EXPECT_EQ(values.encoding(), intset::Encoding::Int16);
     EXPECT_EQ(snapshot(values), (std::vector<std::int64_t>{20, 40}));
 }
-
-int main(int argc, char** argv) {
-    spdlog::set_level(spdlog::level::info);
-    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
-    spdlog::info("starting GoogleTest suite for intset");
-
-    ::testing::InitGoogleTest(&argc, argv);
-    const int result = RUN_ALL_TESTS();
-
-    spdlog::info("GoogleTest suite finished with code {}", result);
-    return result;
-}

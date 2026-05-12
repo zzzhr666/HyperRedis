@@ -189,15 +189,3 @@ TEST(LinkedListTest, MoveOperationsTransferOwnership) {
     EXPECT_EQ(snapshot(assigned), (std::vector<int>{1, 2, 3}));
     log_snapshot("after move assignment", assigned);
 }
-
-int main(int argc, char** argv) {
-    spdlog::set_level(spdlog::level::info);
-    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
-    spdlog::info("starting GoogleTest suite for linked_list");
-
-    ::testing::InitGoogleTest(&argc, argv);
-    const int result = RUN_ALL_TESTS();
-
-    spdlog::info("GoogleTest suite finished with code {}", result);
-    return result;
-}

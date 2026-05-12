@@ -347,15 +347,3 @@ TEST(DictTest, CopyAndMoveOperationsRemainDisabled) {
     static_assert(!std::is_move_constructible_v<dict<int, int>>);
     static_assert(!std::is_move_assignable_v<dict<int, int>>);
 }
-
-int main(int argc, char** argv) {
-    spdlog::set_level(spdlog::level::info);
-    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
-    spdlog::info("starting GoogleTest suite for dict");
-
-    ::testing::InitGoogleTest(&argc, argv);
-    const int result = RUN_ALL_TESTS();
-
-    spdlog::info("GoogleTest suite finished with code {}", result);
-    return result;
-}

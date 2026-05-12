@@ -937,17 +937,3 @@ TEST(SkipListTest, CopyOperationsRemainDisabled) {
     static_assert(!std::is_move_constructible_v<skipList<int,int>>);
     static_assert(!std::is_move_assignable_v<skipList<int,int>>);
 }
-
-
-
-int main(int argc, char** argv) {
-    spdlog::set_level(spdlog::level::info);
-    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
-    spdlog::info("starting GoogleTest suite for skip_list");
-
-    ::testing::InitGoogleTest(&argc, argv);
-    const int result = RUN_ALL_TESTS();
-
-    spdlog::info("GoogleTest suite finished with code {}", result);
-    return result;
-}
