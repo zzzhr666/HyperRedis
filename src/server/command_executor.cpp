@@ -17,7 +17,7 @@
 
 
 namespace {
-    constexpr std::size_t CommandNumber = 47;
+    constexpr std::size_t CommandNumber = 49;
     constexpr std::string_view ErrEmptyCommand = "ERR empty command";
     constexpr std::string_view ErrUnknownCommand = "ERR unknown command";
     constexpr std::string_view ErrSyntaxError = "ERR syntax error";
@@ -39,6 +39,7 @@ namespace {
         FlushAll,
         FlushDb,
         Get,
+        GetRange,
         HDel,
         HGet,
         HGetAll,
@@ -63,6 +64,7 @@ namespace {
         SCard,
         Select,
         Set,
+        SetRange,
         SIsMember,
         SMembers,
         SRem,
@@ -91,56 +93,58 @@ namespace {
     constexpr std::size_t UnlimitedArity = std::numeric_limits<std::size_t>::max();
 
     constexpr auto makeRegistry() {
-        std::array<CommandSpec,CommandNumber> registry{
-        {
-        {"APPEND", 3, 3, CommandName::Append, true},
-        {"DBSIZE", 1, 1, CommandName::DbSize, false},
-        {"DECR", 2, 2, CommandName::Decr, true},
-        {"DEL", 2, UnlimitedArity, CommandName::Del, true},
-        {"EXISTS", 2, UnlimitedArity, CommandName::Exists, false},
-        {"EXPIRE", 3, 4, CommandName::Expire, true},
-        {"FLUSHALL", 1, 1, CommandName::FlushAll, true},
-        {"FLUSHDB", 1, 1, CommandName::FlushDb, true},
-        {"GET", 2, 2, CommandName::Get, false},
-        {"HDEL", 3, UnlimitedArity, CommandName::HDel, true},
-        {"HGET", 3, 3, CommandName::HGet, false},
-        {"HGETALL", 2, 2, CommandName::HGetAll, false},
-        {"HLEN", 2, 2, CommandName::HLen, false},
-        {"HSET", 4, 4, CommandName::HSet, true},
-        {"INCR", 2, 2, CommandName::Incr, true},
-        {"INCRBY", 3, 3, CommandName::IncrBy, true},
-        {"INCRBYFLOAT", 3, 3, CommandName::IncrByFloat, true},
-        {"LLEN", 2, 2, CommandName::LLen, false},
-        {"LPOP", 2, 2, CommandName::LPop, true},
-        {"LPUSH", 3, UnlimitedArity, CommandName::LPush, true},
-        {"LRANGE", 4, 4, CommandName::LRange, false},
-        {"MGET", 2, UnlimitedArity, CommandName::MGet, false},
-        {"MSET", 3, UnlimitedArity, CommandName::MSet, true},
-        {"PEXPIRE", 3, 4, CommandName::PExpire, true},
-        {"PERSIST", 2, 2, CommandName::Persist, true},
-        {"PING", 1, 2, CommandName::Ping, false},
-        {"PTTL", 2, 2, CommandName::Pttl, false},
-        {"RANDOMKEY", 1, 1, CommandName::RandomKey, false},
-        {"RENAME", 3, 3, CommandName::Rename, true},
-        {"RENAMENX", 3, 3, CommandName::RenameNx, true},
-        {"RPOP", 2, 2, CommandName::RPop, true},
-        {"RPUSH", 3, UnlimitedArity, CommandName::RPush, true},
-        {"SADD", 3, UnlimitedArity, CommandName::SAdd, true},
-        {"SCARD", 2, 2, CommandName::SCard, false},
-        {"SELECT", 2, 2, CommandName::Select, false},
-        {"SET", 3, 3, CommandName::Set, true},
-        {"SISMEMBER", 3, 3, CommandName::SIsMember, false},
-        {"SMEMBERS", 2, 2, CommandName::SMembers, false},
-        {"SREM", 3, UnlimitedArity, CommandName::SRem, true},
-        {"STRLEN", 2, 2, CommandName::StrLen, false},
-        {"TTL", 2, 2, CommandName::Ttl, false},
-        {"TYPE", 2, 2, CommandName::Type, false},
-        {"ZADD", 4, UnlimitedArity, CommandName::ZAdd, true},
-        {"ZCARD", 2, 2, CommandName::ZCard, false},
-        {"ZRANGE", 4, 4, CommandName::ZRange, false},
-        {"ZREM", 3, UnlimitedArity, CommandName::ZRem, true},
-        {"ZSCORE", 3, 3, CommandName::ZScore, false}
-        }
+        std::array<CommandSpec, CommandNumber> registry{
+            {
+                {"APPEND", 3, 3, CommandName::Append, true},
+                {"DBSIZE", 1, 1, CommandName::DbSize, false},
+                {"DECR", 2, 2, CommandName::Decr, true},
+                {"DEL", 2, UnlimitedArity, CommandName::Del, true},
+                {"EXISTS", 2, UnlimitedArity, CommandName::Exists, false},
+                {"EXPIRE", 3, 4, CommandName::Expire, true},
+                {"FLUSHALL", 1, 1, CommandName::FlushAll, true},
+                {"FLUSHDB", 1, 1, CommandName::FlushDb, true},
+                {"GET", 2, 2, CommandName::Get, false},
+                {"GETRANGE", 4, 4, CommandName::GetRange, false},
+                {"HDEL", 3, UnlimitedArity, CommandName::HDel, true},
+                {"HGET", 3, 3, CommandName::HGet, false},
+                {"HGETALL", 2, 2, CommandName::HGetAll, false},
+                {"HLEN", 2, 2, CommandName::HLen, false},
+                {"HSET", 4, 4, CommandName::HSet, true},
+                {"INCR", 2, 2, CommandName::Incr, true},
+                {"INCRBY", 3, 3, CommandName::IncrBy, true},
+                {"INCRBYFLOAT", 3, 3, CommandName::IncrByFloat, true},
+                {"LLEN", 2, 2, CommandName::LLen, false},
+                {"LPOP", 2, 2, CommandName::LPop, true},
+                {"LPUSH", 3, UnlimitedArity, CommandName::LPush, true},
+                {"LRANGE", 4, 4, CommandName::LRange, false},
+                {"MGET", 2, UnlimitedArity, CommandName::MGet, false},
+                {"MSET", 3, UnlimitedArity, CommandName::MSet, true},
+                {"PEXPIRE", 3, 4, CommandName::PExpire, true},
+                {"PERSIST", 2, 2, CommandName::Persist, true},
+                {"PING", 1, 2, CommandName::Ping, false},
+                {"PTTL", 2, 2, CommandName::Pttl, false},
+                {"RANDOMKEY", 1, 1, CommandName::RandomKey, false},
+                {"RENAME", 3, 3, CommandName::Rename, true},
+                {"RENAMENX", 3, 3, CommandName::RenameNx, true},
+                {"RPOP", 2, 2, CommandName::RPop, true},
+                {"RPUSH", 3, UnlimitedArity, CommandName::RPush, true},
+                {"SADD", 3, UnlimitedArity, CommandName::SAdd, true},
+                {"SCARD", 2, 2, CommandName::SCard, false},
+                {"SELECT", 2, 2, CommandName::Select, false},
+                {"SET", 3, 3, CommandName::Set, true},
+                {"SETRANGE", 4, 4, CommandName::SetRange, true},
+                {"SISMEMBER", 3, 3, CommandName::SIsMember, false},
+                {"SMEMBERS", 2, 2, CommandName::SMembers, false},
+                {"SREM", 3, UnlimitedArity, CommandName::SRem, true},
+                {"STRLEN", 2, 2, CommandName::StrLen, false},
+                {"TTL", 2, 2, CommandName::Ttl, false},
+                {"TYPE", 2, 2, CommandName::Type, false},
+                {"ZADD", 4, UnlimitedArity, CommandName::ZAdd, true},
+                {"ZCARD", 2, 2, CommandName::ZCard, false},
+                {"ZRANGE", 4, 4, CommandName::ZRange, false},
+                {"ZREM", 3, UnlimitedArity, CommandName::ZRem, true},
+                {"ZSCORE", 3, 3, CommandName::ZScore, false}
+            }
         };
         std::ranges::sort(registry, {}, &CommandSpec::name);
 
@@ -365,6 +369,8 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
         return flushDb_(manager, client);
     case CommandName::Get:
         return get_(manager, client, args, now);
+    case CommandName::GetRange:
+        return getRange_(manager, client, args, now);
     case CommandName::Ping:
         return ping_(args);
     case CommandName::RandomKey:
@@ -375,6 +381,8 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
         return select_(manager, client, args);
     case CommandName::Set:
         return set_(manager, client, args);
+    case CommandName::SetRange:
+        return setRange_(manager, client, args, now);
     case CommandName::Type:
         return type_(manager, client, args, now);
     case CommandName::Ttl:
@@ -598,7 +606,6 @@ hyper::RespValue hyper::CommandExecutor::mGet_(RedisManager& manager, RedisClien
         } else {
             resp_array->values.emplace_back(respNullBulk());
         }
-
     }
     return resp_array;
 }
@@ -733,7 +740,7 @@ hyper::RespValue hyper::CommandExecutor::incrByFloat_(RedisManager& manager, Red
         auto obj = RedisObject::createSharedStringObject("0");
         auto updated = obj->stringIncrByFloat(increment_v);
         if (updated.has_value()) {
-            db->set(std::string(key),obj);
+            db->set(std::string(key), obj);
             return respBulk(obj->asString());
         }
         return commandError(ErrFloatResultInvalid);
@@ -757,12 +764,46 @@ hyper::RespValue hyper::CommandExecutor::incrByFloat_(RedisManager& manager, Red
 
 hyper::RespValue hyper::CommandExecutor::getRange_(RedisManager& manager, RedisClientContext& client, Args args,
                                                    ExpireTimePoint now) const {
-    return commandError(ErrCommandNotImplemented);
+    auto start = parseLong(args[2]);
+    auto end = parseLong(args[3]);
+    if (!(start.has_value() && end.has_value())) {
+        return commandError(ErrInvalidInteger);
+    }
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto& key = args[1];
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respBulk({});
+    }
+    if (res->getType() != ObjectType::String) {
+        return commandError(ErrWrongType);
+    }
+
+    return respBulk(std::move(res->stringGetRange(static_cast<int>(start.value()), static_cast<int>(end.value()))));
 }
 
 hyper::RespValue hyper::CommandExecutor::setRange_(RedisManager& manager, RedisClientContext& client, Args args,
                                                    ExpireTimePoint now) const {
-    return commandError(ErrCommandNotImplemented);
+    auto offset_opt = parseSize(args[2]);
+    if (!offset_opt.has_value()) {
+        return commandError(ErrInvalidInteger);
+    }
+    std::size_t offset = offset_opt.value();
+    auto& key = args[1];
+    auto& value = args[3];
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        auto new_obj = RedisObject::createSharedStringObject({});
+        db->set(std::string(key),new_obj);
+        res = new_obj;
+    } else if (res->getType() != ObjectType::String) {
+        return commandError(ErrWrongType);
+    }
+    res->stringSetRange(offset,value);
+    return respInteger(static_cast<std::int64_t>(res->stringLen()));
 }
 
 hyper::RespValue hyper::CommandExecutor::lPush_(RedisManager& manager, RedisClientContext& client, Args args,
