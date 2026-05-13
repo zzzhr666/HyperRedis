@@ -18,17 +18,12 @@ namespace hyper {
                                         ExpireTimePoint now) const;
 
     private:
-        [[nodiscard]] RespValue dbSize_(RedisManager& manager, RedisClientContext& client,
-                                        ExpireTimePoint now) const;
-
+        // --- Generic / Database / Connection ---
         [[nodiscard]] RespValue ping_(Args args) const;
 
         [[nodiscard]] RespValue select_(RedisManager& manager, RedisClientContext& client, Args args) const;
 
-        [[nodiscard]] RespValue set_(RedisManager& manager, RedisClientContext& client, Args args) const;
-
-        [[nodiscard]] RespValue get_(RedisManager& manager, RedisClientContext& client, Args args,
-                                     ExpireTimePoint now) const;
+        [[nodiscard]] RespValue dbSize_(RedisManager& manager, RedisClientContext& client, ExpireTimePoint now) const;
 
         [[nodiscard]] RespValue del_(RedisManager& manager, RedisClientContext& client, Args args,
                                      ExpireTimePoint now) const;
@@ -67,6 +62,12 @@ namespace hyper {
         [[nodiscard]] RespValue renameNx_(RedisManager& manager, RedisClientContext& client, Args args,
                                           ExpireTimePoint now) const;
 
+        // --- String ---
+        [[nodiscard]] RespValue set_(RedisManager& manager, RedisClientContext& client, Args args) const;
+
+        [[nodiscard]] RespValue get_(RedisManager& manager, RedisClientContext& client, Args args,
+                                     ExpireTimePoint now) const;
+
         [[nodiscard]] RespValue mGet_(RedisManager& manager, RedisClientContext& client, Args args,
                                       ExpireTimePoint now) const;
 
@@ -96,6 +97,7 @@ namespace hyper {
         [[nodiscard]] RespValue setRange_(RedisManager& manager, RedisClientContext& client, Args args,
                                           ExpireTimePoint now) const;
 
+        // --- List ---
         [[nodiscard]] RespValue lPush_(RedisManager& manager, RedisClientContext& client, Args args,
                                        ExpireTimePoint now) const;
 
@@ -114,6 +116,22 @@ namespace hyper {
         [[nodiscard]] RespValue lRange_(RedisManager& manager, RedisClientContext& client, Args args,
                                         ExpireTimePoint now) const;
 
+        [[nodiscard]] RespValue lIndex_(RedisManager& manager, RedisClientContext& client, Args args,
+                                        ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue lSet_(RedisManager& manager, RedisClientContext& client, Args args,
+                                      ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue lInsert_(RedisManager& manager, RedisClientContext& client, Args args,
+                                         ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue lRem_(RedisManager& manager, RedisClientContext& client, Args args,
+                                      ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue lTrim_(RedisManager& manager, RedisClientContext& client, Args args,
+                                       ExpireTimePoint now) const;
+
+        // --- Hash ---
         [[nodiscard]] RespValue hSet_(RedisManager& manager, RedisClientContext& client, Args args,
                                       ExpireTimePoint now) const;
 
@@ -129,6 +147,16 @@ namespace hyper {
         [[nodiscard]] RespValue hGetAll_(RedisManager& manager, RedisClientContext& client, Args args,
                                          ExpireTimePoint now) const;
 
+        [[nodiscard]] RespValue hExists_(RedisManager& manager, RedisClientContext& client, Args args,
+                                         ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue hKeys_(RedisManager& manager, RedisClientContext& client, Args args,
+                                       ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue hVals_(RedisManager& manager, RedisClientContext& client, Args args,
+                                       ExpireTimePoint now) const;
+
+        // --- Set ---
         [[nodiscard]] RespValue sAdd_(RedisManager& manager, RedisClientContext& client, Args args,
                                       ExpireTimePoint now) const;
 
@@ -144,6 +172,13 @@ namespace hyper {
         [[nodiscard]] RespValue sMembers_(RedisManager& manager, RedisClientContext& client, Args args,
                                           ExpireTimePoint now) const;
 
+        [[nodiscard]] RespValue sPop_(RedisManager& manager, RedisClientContext& client, Args args,
+                                      ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue sRandMember_(RedisManager& manager, RedisClientContext& client, Args args,
+                                             ExpireTimePoint now) const;
+
+        // --- ZSet ---
         [[nodiscard]] RespValue zAdd_(RedisManager& manager, RedisClientContext& client, Args args,
                                       ExpireTimePoint now) const;
 
@@ -159,5 +194,25 @@ namespace hyper {
         [[nodiscard]] RespValue zRange_(RedisManager& manager, RedisClientContext& client, Args args,
                                         ExpireTimePoint now) const;
 
+        [[nodiscard]] RespValue zRank_(RedisManager& manager, RedisClientContext& client, Args args,
+                                       ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue zRevRank_(RedisManager& manager, RedisClientContext& client, Args args,
+                                          ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue zCount_(RedisManager& manager, RedisClientContext& client, Args args,
+                                        ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue zRevRange_(RedisManager& manager, RedisClientContext& client, Args args,
+                                           ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue zIncrBy_(RedisManager& manager, RedisClientContext& client, Args args,
+                                         ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue zRemRangeByRank_(RedisManager& manager, RedisClientContext& client, Args args,
+                                                 ExpireTimePoint now) const;
+
+        [[nodiscard]] RespValue zRemRangeByScore_(RedisManager& manager, RedisClientContext& client, Args args,
+                                                  ExpireTimePoint now) const;
     };
 }
