@@ -1,6 +1,7 @@
 #include "hyper/storage/snapshot.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -18,7 +19,7 @@ namespace {
     hyper::UnixMilliseconds toUnixMilliseconds(hyper::ExpireTimePoint time) {
         return std::chrono::duration_cast<hyper::Milliseconds>(
             time.time_since_epoch()
-            ).count();
+        ).count();
     }
 
     hyper::ExpireTimePoint fromUnixMilliseconds(hyper::UnixMilliseconds ms) {
@@ -100,9 +101,13 @@ namespace {
             writeRaw(obj);
         }
 
+        void writeDouble(double value) {
+            auto bits = std::bit_cast<std::uint64_t>(value);
+            writeUint64BigEndian(bits);
+        }
+
         void writeValue(const hyper::RedisObjectPtr& obj) {
             switch (obj->getType()) {
-
             case hyper::ObjectType::String: {
                 writeStringObject(obj->asString());
                 break;
@@ -130,9 +135,9 @@ namespace {
             case hyper::ObjectType::ZSet: {
                 writeLength(obj->zSetSize());
                 auto infos = obj->zSetRange(0, -1);
-                for (const auto& [member,score] : infos) {
+                for (const auto& [member, score] : infos) {
                     writeStringObject(member);
-                    writeRaw(&score, sizeof(score));
+                    writeDouble(score);
                 }
                 break;
             }
@@ -140,7 +145,7 @@ namespace {
                 auto fields = obj->hashGetAllAsStrings();
                 std::ranges::sort(fields);
                 writeLength(fields.size());
-                for (const auto& [field,value] : fields) {
+                for (const auto& [field, value] : fields) {
                     writeStringObject(field);
                     writeStringObject(value);
                 }
@@ -158,11 +163,14 @@ namespace {
     class RdbReader {
     public:
         explicit RdbReader(const std::vector<std::uint8_t>& data)
-            : data_(data), position_(0), success_(true) {
+            : data_(data), position_(0), success_(true) {}
+
+        [[nodiscard]] bool keepSuccess() const {
+            return success_;
         }
 
-        [[nodiscard]] bool success() const {
-            return success_;
+        void enFail() noexcept {
+            success_ = false;
         }
 
         std::uint8_t readUint8() {
@@ -235,11 +243,12 @@ namespace {
 
         std::uint64_t readLength() {
             const auto first = readUint8();
-            if (!success()) {
+            if (!success_) {
                 return 0;
             }
             const auto flag = first & 0xC0;
-            if (flag == 0x00) { //  < 64
+            if (flag == 0x00) {
+                //  < 64
                 return first & 0x3F;
             }
             if (flag == 0x40) {
@@ -247,7 +256,7 @@ namespace {
                 if (!success_) {
                     return 0;
                 }
-                return static_cast<std::uint64_t>(first&0x3F) << 8 |
+                return static_cast<std::uint64_t>(first & 0x3F) << 8 |
                     static_cast<std::uint64_t>(second);
             }
             if (first == 0x80) {
@@ -255,6 +264,119 @@ namespace {
             }
             success_ = false;
             return 0;
+        }
+
+        std::string readRawString(std::size_t len) {
+            if (!success_ || !canRead_(len)) {
+                success_ = false;
+                return {};
+            }
+            std::string res{
+                reinterpret_cast<const char*>(data_.data()) + position_,
+                reinterpret_cast<const char*>(data_.data()) + position_ + len
+            };
+            position_ += len;
+            return res;
+        }
+
+        std::string readStringObject() {
+            auto len = readLength();
+            return readRawString(len);
+        }
+
+        double readDouble() {
+            auto bits = readUint64BigEndian();
+            if (!success_) {
+                return 0;
+            }
+            return std::bit_cast<double>(bits);
+        }
+
+        [[nodiscard]] bool atEnd() const noexcept {
+            return position_ == data_.size();
+        }
+
+        [[nodiscard]] bool nextIsEof() const noexcept {
+            return success_ && canRead_(1) && data_[position_] == hyper::OpCode_EOF;
+        }
+
+        hyper::RedisObjectPtr readValue(hyper::ObjectType type) {
+            switch (type) {
+            case hyper::ObjectType::String: {
+                auto value = readStringObject();
+                if (!success_) {
+                    return nullptr;
+                }
+                return hyper::RedisObject::createSharedStringObject(value);
+            }
+            case hyper::ObjectType::List: {
+                auto len = readLength();
+                if (!success_) {
+                    return nullptr;
+                }
+                auto obj = hyper::RedisObject::createSharedListObject();
+                for (std::uint64_t i = 0; i < len; ++i) {
+                    auto item = readStringObject();
+                    if (!success_) {
+                        return nullptr;
+                    }
+                    obj->listRightPush(hyper::RedisObject::createSharedStringObject(item));
+                }
+                return obj;
+            }
+            case hyper::ObjectType::Set: {
+                auto len = readLength();
+                if (!success_) {
+                    return nullptr;
+                }
+                auto obj = hyper::RedisObject::createSharedSetObject();
+                for (std::uint64_t i = 0; i < len; ++i) {
+                    auto member = readStringObject();
+                    if (!success_) {
+                        return nullptr;
+                    }
+                    obj->setAdd(member);
+                }
+                return obj;
+            }
+
+            case hyper::ObjectType::ZSet: {
+                auto len = readLength();
+                if (!success_) {
+                    return nullptr;
+                }
+                auto obj = hyper::RedisObject::createSharedZSetObject();
+                for (std::uint64_t i = 0; i < len; ++i) {
+                    auto member = readStringObject();
+                    auto score = readDouble();
+                    if (!success_) {
+                        return nullptr;
+                    }
+                    obj->zSetAdd(member, score);
+                }
+                return obj;
+            }
+
+            case hyper::ObjectType::Hash: {
+                auto len = readLength();
+                if (!success_) {
+                    return nullptr;
+                }
+                auto obj = hyper::RedisObject::createSharedHashObject();
+                for (std::uint64_t i = 0; i < len; ++i) {
+                    auto field = readStringObject();
+                    auto value = readStringObject();
+                    if (!success_) {
+                        return nullptr;
+                    }
+                    obj->hashSet(field, hyper::RedisObject::createSharedStringObject(value));
+                }
+                return obj;
+            }
+            default:
+                success_ = false;
+                return nullptr;
+            }
         }
 
     private:
@@ -269,7 +391,7 @@ namespace {
     };
 }
 
-std::vector<std::uint8_t> hyper::Snapshot::save(RedisManager& manager, ExpireTimePoint now) const {
+std::vector<std::uint8_t> hyper::Snapshot::save(RedisManager& manager, ExpireTimePoint now) {
     RdbWriter writer;
     writer.writeRaw(Magic);
     writer.writeRaw(Version);
@@ -301,9 +423,71 @@ std::vector<std::uint8_t> hyper::Snapshot::save(RedisManager& manager, ExpireTim
     return writer.finish();
 }
 
-bool hyper::Snapshot::load(const std::vector<std::uint8_t>& data, RedisManager& manager, ExpireTimePoint now) const {
-    (void)data;
-    (void)manager;
-    (void)now;
-    return false;
+bool hyper::Snapshot::load(const std::vector<std::uint8_t>& data, RedisManager& manager, ExpireTimePoint now) {
+    RdbReader reader(data);
+
+    auto magic = reader.readRawString(5);
+    if (magic != "REDIS") {
+        return false;
+    }
+    auto version = reader.readRawString(4);
+    if (version != "0009") {
+        return false;
+    }
+    RedisManager current_manager(manager.dbCount());
+    auto current_db = current_manager.db(0);
+
+    while (!reader.nextIsEof()) {
+        auto opcode = reader.readUint8();
+        if (!reader.keepSuccess()) {
+            return false;
+        }
+        if (opcode == OpCode_SelectDb) {
+            auto db_index = reader.readLength();
+            if (!reader.keepSuccess() || db_index >= current_manager.dbCount()) {
+                return false;
+            }
+            current_db = current_manager.db(db_index);
+            continue;
+        }
+        ExpireTimePoint deadline{};
+        bool has_expired = false;
+        if (opcode == OpCode_ExpireTimeMs) {
+            auto expire_ms = reader.readUint64BigEndian();
+            if (!reader.keepSuccess()) {
+                return false;
+            }
+            deadline = fromUnixMilliseconds(static_cast<UnixMilliseconds>(expire_ms));
+            has_expired = true;
+            opcode = reader.readUint8();
+            if (!reader.keepSuccess()) {
+                return false;
+            }
+        }
+
+        if (opcode > static_cast<std::uint8_t>(ObjectType::Hash)) {
+            return false;
+        }
+        auto type = static_cast<ObjectType>(opcode);
+        auto key = reader.readStringObject();
+        auto value = reader.readValue(type);
+        if (!reader.keepSuccess() || value == nullptr) {
+            return false;
+        }
+        if (has_expired && deadline <= now) {
+            continue; //已经过期的直接忽略
+        }
+        current_db->set(key, value);
+        if (has_expired) {
+            current_db->expireAt(key, now, deadline);
+        }
+    }
+    reader.readUint8(); // read EOF
+    auto checksum = reader.readChecksum();
+    if (!reader.keepSuccess() || checksum != 0 || !reader.atEnd()) {
+        //todo: 校验机制
+        return false;
+    }
+    manager.swapAll(current_manager);
+    return true;
 }

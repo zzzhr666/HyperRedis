@@ -4,7 +4,7 @@
 
 这个仓库主要记录我在阅读《Redis 设计与实现》以及理解 Redis 源码过程中，对核心数据结构、对象系统、数据库和命令执行流程的手写实现与思考。目标不是做一个生产级 Redis 替代品，而是在保留 Redis 经典设计思想的前提下，用现代 C++ 重新表达原版 C 语言实现中的核心能力。
 
-当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RESP 响应值模型和命令执行器。完整 TCP 服务器、RESP 请求解析和性能基准仍在后续计划中。
+当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、RESP 响应值模型和命令执行器。完整 TCP 服务器、RESP 请求解析和性能基准仍在后续计划中。
 
 ## 项目目标
 
@@ -109,7 +109,8 @@ HyperRedis/
 │   │   ├── object.hpp              # RedisObject 与编码转换
 │   │   ├── database.hpp            # RedisDb、过期字典、TTL
 │   │   ├── redis_manager.hpp       # 多 DB 管理
-│   │   └── snapshot.hpp            # RDB-like 快照接口
+│   │   ├── snapshot.hpp            # RDB-like 字节编解码
+│   │   └── rdb_saver.hpp           # RDB-like 文件落盘包装
 │   └── server/                     # 未来服务器层之前的命令核心
 │       ├── resp_value.hpp          # RESP 响应值模型
 │       ├── client_context.hpp      # 客户端当前 DB 上下文
@@ -178,7 +179,8 @@ HyperRedis/
 | **RedisManager**       | 多 DB 管理，默认 16 个 DB                               |
 | **RedisClientContext** | 保存客户端当前 DB 选择                                    |
 | **CommandExecutor**    | 命令入口，返回 RESP 风格响应模型                              |
-| **Snapshot**           | RDB-like 快照模块，当前保存路径已实现，加载路径仍在开发中                |
+| **Snapshot**           | RDB-like 字节编解码，支持多 DB、过期元数据和五种对象类型 round-trip       |
+| **RdbSaver**           | 文件落盘包装，基于临时文件和 rename 写入 RDB-like 快照                  |
 
 ---
 
@@ -407,16 +409,17 @@ using RespValue = std::variant<
 | Set | `SADD`、`SREM`、`SISMEMBER`、`SCARD`、`SMEMBERS`、`SPOP`、`SRANDMEMBER` |
 | ZSet | `ZADD`、`ZREM`、`ZSCORE`、`ZCARD`、`ZRANGE`、`ZRANK`、`ZREVRANK`、`ZCOUNT`、`ZREVRANGE`、`ZINCRBY`、`ZREMRANGEBYRANK`、`ZREMRANGEBYSCORE` |
 
-### F. RDB-like Snapshot
+### F. RDB-like Snapshot / RdbSaver
 
 - [x] `Snapshot` 接口
-- [x] header、DB 选择、过期时间和值对象保存
-- [x] String / List / Set / Hash / ZSet 保存路径
+- [x] header、DB 选择、过期时间和值对象保存与加载
+- [x] String / List / Set / Hash / ZSet round-trip
 - [x] 保存时过滤已过期 key
+- [x] 加载时跳过已经过期的 key，坏数据不会污染现有 manager
 - [x] 对 key、Set member、Hash field 排序，提升快照字节稳定性
-- [ ] `Snapshot::load` 完整反序列化
+- [x] `RdbSaver` 文件保存与加载包装
+- [x] 文件级 round-trip、缺失文件和坏文件测试
 - [ ] checksum 校验
-- [ ] snapshot round-trip 测试接入 CTest
 
 ---
 
@@ -429,6 +432,7 @@ using RespValue = std::variant<
 - Redis 可见行为：范围、rank、随机成员、错误语义、边界值
 - 数据库层：过期、TTL/PTTL、rename、random key、active expire
 - 多 DB：`RedisManager` 与 `RedisClientContext`
+- RDB-like 持久化：`Snapshot` 字节 round-trip、`RdbSaver` 文件 round-trip 和坏文件保护
 - 命令层：命令分发、参数校验、wrong type、Redis 风格响应
 
 运行方式：
@@ -532,8 +536,8 @@ ctest --test-dir build --output-on-failure
 
 近期重点：
 
-- 完成 `Snapshot::load`，支持 String / List / Set / Hash / ZSet 和过期时间反序列化
-- 为 snapshot round-trip 增加并接入 CTest
+- 将 RDB-like 持久化接入未来服务器启动/关闭流程
+- 设计同步 `SAVE` 和基于 fork/COW 的 `BGSAVE` 入口
 - 清理命令执行器中重复的容器访问模式
 - 补齐 RESP 请求解析和响应序列化
 - 增加完整服务器目标和 TCP 连接管理

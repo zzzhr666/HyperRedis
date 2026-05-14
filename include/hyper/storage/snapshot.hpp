@@ -22,10 +22,9 @@ namespace hyper {
 
     class Snapshot {
     public:
-        [[nodiscard]] std::vector<std::uint8_t> save(RedisManager& manager, ExpireTimePoint now) const;
+        static std::vector<std::uint8_t> save(RedisManager& manager, ExpireTimePoint now);
 
-        bool load(const std::vector<std::uint8_t>& data, RedisManager& manager, ExpireTimePoint now) const;
-
+        static bool load(const std::vector<std::uint8_t>& data, RedisManager& manager, ExpireTimePoint now);
 
     };
 }

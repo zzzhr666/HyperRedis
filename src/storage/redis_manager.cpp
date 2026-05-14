@@ -33,3 +33,7 @@ void hyper::RedisManager::clearAll() {
         db->clear();
     }
 }
+
+void hyper::RedisManager::swapAll(RedisManager& other) noexcept {
+    dbs_.swap(other.dbs_);
+}

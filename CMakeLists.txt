@@ -14,6 +14,7 @@ set(STORAGE_ENGINE_SOURCES
         src/storage/database.cpp
         src/storage/redis_manager.cpp
         src/storage/snapshot.cpp
+        src/storage/rdb_saver.cpp
 )
 
 set(SERVER_CORE_SOURCES
@@ -69,9 +70,11 @@ set(HYPERREDIS_TESTS
         object_stress_test
         redis_object_redis_behavior_test
         database_test
-    redis_manager_test
-    client_context_test
-    command_executor_test
+        redis_manager_test
+        snapshot_test
+        rdb_saver_test
+        client_context_test
+        command_executor_test
 )
 
 foreach (test_target IN LISTS HYPERREDIS_TESTS)

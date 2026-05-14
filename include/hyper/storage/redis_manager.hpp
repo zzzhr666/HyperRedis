@@ -31,6 +31,8 @@ namespace hyper {
 
         void clearAll();
 
+        void swapAll(RedisManager& other) noexcept;
+
 
 
     private:

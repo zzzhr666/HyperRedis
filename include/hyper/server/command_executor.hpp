@@ -14,8 +14,8 @@ namespace hyper {
     public:
         using Args = std::span<const std::string_view>;
 
-        [[nodiscard]] RespValue execute(RedisManager& manager, RedisClientContext& client, Args args,
-                                        ExpireTimePoint now) const;
+        RespValue execute(RedisManager& manager, RedisClientContext& client, Args args,
+                          ExpireTimePoint now) const;
 
     private:
         // --- Generic / Database / Connection ---

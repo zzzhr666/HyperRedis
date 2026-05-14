@@ -21,11 +21,11 @@ namespace {
     }
 
     template<std::size_t N>
-    [[nodiscard]] RespValue execute(CommandExecutor& executor,
-                                    RedisManager& manager,
-                                    RedisClientContext& client,
-                                    const std::array<std::string_view, N>& args,
-                                    ExpireTimePoint now = makeTime(1'000)) {
+    RespValue execute(CommandExecutor& executor,
+                      RedisManager& manager,
+                      RedisClientContext& client,
+                      const std::array<std::string_view, N>& args,
+                      ExpireTimePoint now = makeTime(1'000)) {
         return executor.execute(manager, client, std::span<const std::string_view>{args.data(), args.size()}, now);
     }
 
