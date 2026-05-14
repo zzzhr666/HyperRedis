@@ -67,4 +67,11 @@ Use short, imperative commit messages with a bracketed type prefix such as `[fea
 - `[fix] correct object lifetime handling`
 - `[chore] update CMake source lists`
 
+When the user explicitly asks to commit and push, use the direct release path:
+
+- Run the relevant build/test command immediately, usually `cmake --build build` followed by `ctest --test-dir build --output-on-failure`.
+- If tests pass, stage the current requested worktree changes, commit with the project message style, and push to the current branch's upstream without extra review loops.
+- Do not make opportunistic cleanup, formatting, refactors, newline normalization, or unrelated fixes during a commit/push request unless the user specifically asks for them.
+- If tests fail or git/network permissions block the operation, report the concrete blocker and stop instead of expanding the task.
+
 Pull requests should describe the behavior change, list touched modules, mention any `CMakeLists.txt` source-list updates, and include build or test evidence when available.
