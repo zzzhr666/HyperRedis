@@ -13,6 +13,7 @@ set(STORAGE_ENGINE_SOURCES
         src/storage/object.cpp
         src/storage/database.cpp
         src/storage/redis_manager.cpp
+        src/storage/snapshot.cpp
 )
 
 set(SERVER_CORE_SOURCES

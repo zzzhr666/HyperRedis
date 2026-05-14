@@ -98,7 +98,7 @@ test/               GoogleTest 测试
 - List：`LPUSH`、`RPUSH`、`LPOP`、`RPOP`、`LLEN`、`LRANGE`、`LINDEX`、`LSET`、`LINSERT`、`LREM`、`LTRIM`
 - Hash：`HSET`、`HGET`、`HDEL`、`HLEN`、`HGETALL`、`HEXISTS`、`HKEYS`、`HVALS`
 - Set：`SADD`、`SREM`、`SISMEMBER`、`SCARD`、`SMEMBERS`、`SPOP`、`SRANDMEMBER`
-- ZSet：`ZADD`、`ZREM`、`ZSCORE`、`ZCARD`、`ZRANGE`
+- ZSet：`ZADD`、`ZREM`、`ZSCORE`、`ZCARD`、`ZRANGE`、`ZRANK`、`ZREVRANK`、`ZCOUNT`、`ZREVRANGE`、`ZINCRBY`、`ZREMRANGEBYRANK`、`ZREMRANGEBYSCORE`
 
 `EXPIRE`/`PEXPIRE` 已支持 `NX`、`XX`、`GT`、`LT` 条件选项。
 
@@ -112,27 +112,27 @@ test/               GoogleTest 测试
 - RedisDb、RedisManager、RedisClientContext 测试
 - CommandExecutor 命令级测试
 
-今天补齐并测试的命令：
+近期补齐并测试的命令：
 
 - List：`LINDEX`、`LSET`、`LINSERT`、`LREM`、`LTRIM`
 - Hash：`HEXISTS`、`HKEYS`、`HVALS`
 - Set：`SPOP`、`SRANDMEMBER`
+- ZSet：`ZRANK`、`ZREVRANK`、`ZCOUNT`、`ZREVRANGE`、`ZINCRBY`、`ZREMRANGEBYRANK`、`ZREMRANGEBYSCORE`
 
-当前剩余的命令执行器 TODO 主要集中在 ZSet 高级命令：
+RDB snapshot 模块正在实现中：
 
-- `ZRANK`
-- `ZREVRANK`
-- `ZCOUNT`
-- `ZREVRANGE`
-- `ZINCRBY`
-- `ZREMRANGEBYRANK`
-- `ZREMRANGEBYSCORE`
+- 已新增 `Snapshot` 接口和核心库编译接入
+- `RdbWriter` 已支持 header、DB 选择、过期时间、String/List/Set/Hash/ZSet 值写入
+- `save` 会过滤已过期 key，并对 key、Set member、Hash field 排序，保证快照字节更稳定
+- `RdbReader` 已开始实现基础整数读取、checksum 读取和 length 解码
+- `Snapshot::load` 仍在开发中，目前尚未完成完整反序列化
 
 ## 后续计划
 
 近期重点：
 
-- 补齐剩余 ZSet 命令执行器实现和测试
+- 完成 `Snapshot::load`，覆盖 String/List/Set/Hash/ZSet 和过期时间反序列化
+- 为 snapshot round-trip 增加测试并接入 CTest
 - 清理命令执行器中重复的容器访问模式
 - 补齐 RESP 请求解析和响应序列化
 - 增加完整服务器目标和网络连接管理

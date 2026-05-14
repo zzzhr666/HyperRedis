@@ -47,7 +47,7 @@ namespace hyper {
         }
 
         [[nodiscard]] bool isInvalidScore(double score) noexcept {
-            return std::isnan(score);
+            return !std::isfinite(score);
         }
 
     }

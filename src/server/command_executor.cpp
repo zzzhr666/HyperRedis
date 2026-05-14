@@ -1642,42 +1642,176 @@ hyper::RespValue hyper::CommandExecutor::zRange_(RedisManager& manager, RedisCli
 
 hyper::RespValue hyper::CommandExecutor::zRank_(RedisManager& manager, RedisClientContext& client, Args args,
                                                 ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto& key = args[1];
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respNullBulk();
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+    auto& member = args[2];
+    auto rank_opt = res->zSetRank(member);
+    if (!rank_opt.has_value()) {
+        return respNullBulk();
+    }
+    return respInteger(static_cast<std::int64_t>(rank_opt.value()));
 }
 
 hyper::RespValue hyper::CommandExecutor::zRevRank_(RedisManager& manager, RedisClientContext& client, Args args,
                                                    ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto& key = args[1];
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respNullBulk();
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+    auto& member = args[2];
+    auto rank_opt = res->zSetRevRank(member);
+    if (!rank_opt.has_value()) {
+        return respNullBulk();
+    }
+    return respInteger(static_cast<std::int64_t>(rank_opt.value()));
 }
 
 hyper::RespValue hyper::CommandExecutor::zCount_(RedisManager& manager, RedisClientContext& client, Args args,
                                                  ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto min = parseDouble(args[2]);
+    auto max = parseDouble(args[3]);
+    if (!min.has_value() || !max.has_value()) {
+        return commandError(ErrInvalidFloat);
+    }
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto& key = args[1];
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respInteger(0);
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+    auto count = res->zSetCount(min.value(), max.value());
+    return respInteger(static_cast<std::int64_t>(count));
 }
 
 hyper::RespValue hyper::CommandExecutor::zRevRange_(RedisManager& manager, RedisClientContext& client, Args args,
                                                     ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto start = parseLong(args[2]);
+    auto end = parseLong(args[3]);
+    if (!start.has_value() || !end.has_value()) {
+        return commandError(ErrInvalidInteger);
+    }
+    bool need_score = false;
+    if (args.size() == 5) {
+        std::string with_scores(args[4]);
+        std::ranges::transform(with_scores, with_scores.begin(), ::toupper);
+        if (with_scores != "WITHSCORES") {
+            return commandError(ErrSyntaxError);
+        }
+        need_score = true;
+    }
+    auto& key = args[1];
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto arr = std::make_shared<RespArray>();
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return arr;
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+    auto range_data = res->zSetRevRange(static_cast<int>(start.value()), static_cast<int>(end.value()));
+    for (auto& [member, score] : range_data) {
+        arr->values.emplace_back(respBulk(member));
+        if (need_score) {
+            arr->values.emplace_back(respBulk(std::to_string(score)));
+        }
+    }
+    return arr;
 }
 
 hyper::RespValue hyper::CommandExecutor::zIncrBy_(RedisManager& manager, RedisClientContext& client, Args args,
                                                   ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto increment = parseDouble(args[2]);
+    if (!increment.has_value()) {
+        return commandError(ErrInvalidFloat);
+    }
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto& key = args[1];
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        auto new_zset = RedisObject::createSharedZSetObject();
+        db->set(std::string(key), new_zset);
+        res = new_zset;
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+    auto& member = args[3];
+    auto r = res->zSetIncrByChecked(std::string(member), increment.value());
+    if (r.has_value()) {
+        return respBulk(std::to_string(r.value()));
+    }
+    return commandError(ErrFloatResultInvalid);
 }
 
 hyper::RespValue hyper::CommandExecutor::zRemRangeByRank_(RedisManager& manager, RedisClientContext& client, Args args,
                                                           ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto start = parseLong(args[2]);
+    auto end = parseLong(args[3]);
+    if (!start.has_value() || !end.has_value() ||
+        end.value() < std::numeric_limits<int>::min() || end.value() > std::numeric_limits<int>::max() ||
+        start.value() < std::numeric_limits<int>::min() || start.value() > std::numeric_limits<int>::max()) {
+        return commandError(ErrInvalidInteger);
+    }
+    auto& key = args[1];
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respInteger(0);
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+
+    auto count = res->zSetRemoveRangeByRank(static_cast<int>(start.value()), static_cast<int>(end.value()));
+    if (res->zSetSize() == 0) {
+        db->del(key);
+    }
+    return respInteger(static_cast<std::int64_t>(count));
 }
 
 hyper::RespValue hyper::CommandExecutor::zRemRangeByScore_(RedisManager& manager, RedisClientContext& client, Args args,
                                                            ExpireTimePoint now) const {
-    // TODO: implementation
-    return commandError(ErrCommandNotImplemented);
+    auto min = parseDouble(args[2]);
+    auto max = parseDouble(args[3]);
+    if (!min.has_value() || !max.has_value()) {
+        return commandError(ErrInvalidFloat);
+    }
+    auto& key = args[1];
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respInteger(0);
+    }
+    if (res->getType() != ObjectType::ZSet) {
+        return commandError(ErrWrongType);
+    }
+
+    auto count = res->zSetRemoveRangeByScore(min.value(), max.value());
+    if (res->zSetSize() == 0) {
+        db->del(key);
+    }
+    return respInteger(static_cast<std::int64_t>(count));
 }

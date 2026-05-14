@@ -48,6 +48,18 @@ namespace {
         EXPECT_FALSE(bulk_string->value.has_value());
     }
 
+    void expectBulkDouble(const RespValue& value, double expected) {
+        const auto* bulk_string = std::get_if<RespBulkString>(&value);
+        ASSERT_NE(bulk_string, nullptr);
+        ASSERT_TRUE(bulk_string->value.has_value());
+
+        std::size_t consumed{};
+        double actual{};
+        ASSERT_NO_THROW(actual = std::stod(*bulk_string->value, &consumed));
+        EXPECT_EQ(consumed, bulk_string->value->size());
+        EXPECT_DOUBLE_EQ(actual, expected);
+    }
+
     void expectInteger(const RespValue& value, std::int64_t expected) {
         const auto* integer = std::get_if<RespInteger>(&value);
         ASSERT_NE(integer, nullptr);
@@ -70,6 +82,25 @@ namespace {
         for (const auto item : expected) {
             expectBulkString((*arr)->values[index], item);
             ++index;
+        }
+    }
+
+    void expectZSetRangeArray(const RespValue& value, std::initializer_list<std::string_view> expected) {
+        expectBulkArray(value, expected);
+    }
+
+    void expectZSetRangeWithScores(const RespValue& value,
+                                   std::initializer_list<std::pair<std::string_view, double>> expected) {
+        const auto* arr = std::get_if<std::shared_ptr<RespArray>>(&value);
+        ASSERT_NE(arr, nullptr);
+        ASSERT_NE(*arr, nullptr);
+        ASSERT_EQ((*arr)->values.size(), expected.size() * 2);
+
+        std::size_t index{0};
+        for (const auto& [member, score] : expected) {
+            expectBulkString((*arr)->values[index], member);
+            expectBulkDouble((*arr)->values[index + 1], score);
+            index += 2;
         }
     }
 
@@ -1246,4 +1277,193 @@ TEST(CommandExecutorTest, ZAddAtomicValidation) {
 
     // Key should not exist because the whole command failed
     expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"TYPE", "z"}, now), "none");
+}
+
+TEST(CommandExecutorTest, ZRankAndZRevRankReturnRankOrNull) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 8>{"ZADD", "z", "1", "a", "2", "b", "2", "c"}, now),
+                  3);
+
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 3>{"ZRANK", "z", "a"}, now), 0);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 3>{"ZRANK", "z", "c"}, now), 2);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 3>{"ZREVRANK", "z", "a"}, now), 2);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 3>{"ZREVRANK", "z", "c"}, now), 0);
+
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 3>{"ZRANK", "z", "missing"},
+                                 now));
+    expectNullBulkString(execute(executor, manager, client,
+                                 std::array<std::string_view, 3>{"ZREVRANK", "missing", "a"}, now));
+}
+
+TEST(CommandExecutorTest, ZCountCountsInclusiveScoreRange) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 8>{"ZADD", "z", "1", "a", "2", "b", "3", "c"}, now),
+                  3);
+
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 4>{"ZCOUNT", "z", "2", "3"}, now),
+                  2);
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZCOUNT", "z", "4", "5"}, now),
+                  0);
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZCOUNT", "missing", "1", "3"}, now),
+                  0);
+    expectError(execute(executor, manager, client, std::array<std::string_view, 4>{"ZCOUNT", "z", "bad", "3"}, now),
+                "ERR value is not a valid float");
+}
+
+TEST(CommandExecutorTest, ZRevRangeSupportsWithScoresAndMissingKey) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 8>{"ZADD", "z", "1", "a", "2", "b", "3", "c"}, now),
+                  3);
+
+    expectZSetRangeArray(execute(executor, manager, client,
+                                 std::array<std::string_view, 4>{"ZREVRANGE", "z", "0", "-1"}, now),
+                         {"c", "b", "a"});
+    expectZSetRangeArray(execute(executor, manager, client,
+                                 std::array<std::string_view, 4>{"ZREVRANGE", "z", "1", "2"}, now),
+                         {"b", "a"});
+    expectZSetRangeWithScores(execute(executor, manager, client,
+                                      std::array<std::string_view, 5>{"ZREVRANGE", "z", "0", "1", "WITHSCORES"},
+                                      now),
+                              {{"c", 3.0}, {"b", 2.0}});
+    expectZSetRangeArray(execute(executor, manager, client,
+                                 std::array<std::string_view, 4>{"ZREVRANGE", "missing", "0", "-1"}, now),
+                         {});
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 5>{"ZREVRANGE", "z", "0", "1", "BADOPTION"}, now),
+                "ERR syntax error");
+}
+
+TEST(CommandExecutorTest, ZIncrByCreatesAndUpdatesScores) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectBulkDouble(execute(executor, manager, client,
+                             std::array<std::string_view, 4>{"ZINCRBY", "z", "2.5", "a"}, now),
+                     2.5);
+    expectBulkDouble(execute(executor, manager, client,
+                             std::array<std::string_view, 4>{"ZINCRBY", "z", "1.25", "a"}, now),
+                     3.75);
+    expectBulkDouble(execute(executor, manager, client, std::array<std::string_view, 3>{"ZSCORE", "z", "a"}, now),
+                     3.75);
+
+    expectError(execute(executor, manager, client, std::array<std::string_view, 4>{"ZINCRBY", "z", "bad", "a"}, now),
+                "ERR value is not a valid float");
+}
+
+TEST(CommandExecutorTest, ZIncrByRejectsNonFiniteResult) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZADD", "z", "1e308", "a"}, now),
+                  1);
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"ZINCRBY", "z", "1e308", "a"}, now),
+                "ERR increment would produce NaN or Infinity");
+}
+
+TEST(CommandExecutorTest, ZRemRangeByRankRemovesInclusiveRangeAndDeletesEmptyKey) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 10>{"ZADD", "z", "1", "a", "2", "b", "3", "c", "4", "d"},
+                          now),
+                  4);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZREMRANGEBYRANK", "z", "1", "2"}, now),
+                  2);
+    expectZSetRangeArray(execute(executor, manager, client,
+                                 std::array<std::string_view, 4>{"ZRANGE", "z", "0", "-1"}, now),
+                         {"a", "d"});
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZREMRANGEBYRANK", "z", "0", "-1"}, now),
+                  2);
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"TYPE", "z"}, now), "none");
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZREMRANGEBYRANK", "missing", "0", "-1"}, now),
+                  0);
+}
+
+TEST(CommandExecutorTest, ZRemRangeByScoreRemovesInclusiveScoreRangeAndDeletesEmptyKey) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 10>{"ZADD", "z", "1", "a", "2", "b", "3", "c", "4", "d"},
+                          now),
+                  4);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZREMRANGEBYSCORE", "z", "2", "3"}, now),
+                  2);
+    expectZSetRangeArray(execute(executor, manager, client,
+                                 std::array<std::string_view, 4>{"ZRANGE", "z", "0", "-1"}, now),
+                         {"a", "d"});
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZREMRANGEBYSCORE", "z", "1", "4"}, now),
+                  2);
+    expectSimpleString(execute(executor, manager, client, std::array<std::string_view, 2>{"TYPE", "z"}, now), "none");
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 4>{"ZREMRANGEBYSCORE", "missing", "1", "4"}, now),
+                  0);
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"ZREMRANGEBYSCORE", "missing", "bad", "4"}, now),
+                "ERR value is not a valid float");
+}
+
+TEST(CommandExecutorTest, ZSetExtendedCommandsRejectWrongType) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+
+    expectSimpleString(execute(executor, manager, client,
+                               std::array<std::string_view, 3>{"SET", "string", "value"}, now),
+                       "OK");
+
+    expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"ZRANK", "string", "a"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
+    expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"ZREVRANK", "string", "a"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
+    expectError(execute(executor, manager, client, std::array<std::string_view, 4>{"ZCOUNT", "string", "1", "2"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"ZREVRANGE", "string", "0", "-1"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"ZINCRBY", "string", "1", "a"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"ZREMRANGEBYRANK", "string", "0", "-1"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
+    expectError(execute(executor, manager, client,
+                        std::array<std::string_view, 4>{"ZREMRANGEBYSCORE", "string", "1", "2"}, now),
+                "WRONGTYPE Operation against a key holding the wrong kind of value");
 }
