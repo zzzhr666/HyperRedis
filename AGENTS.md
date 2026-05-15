@@ -22,18 +22,38 @@ This repository is organized around `HyperRedisCore`, the non-server core of the
 
 ## Collaboration Mode
 
-This project is also a learning project. When working on Redis data structures or storage components, prefer the following teaching-oriented workflow unless the user explicitly asks for direct implementation:
+This project is also a learning project. When working on Redis data structures, storage components,
+RESP/server code, persistence, or command execution, prefer a training-oriented workflow unless the
+user explicitly asks for direct implementation.
 
-- Explain the design idea, invariants, byte layout, and edge cases before code is written.
-- Split work into small steps that can be finished and tested in one sitting.
-- Let the user implement production code in headers or sources.
-- Review the user's implementation for correctness, undefined behavior, layout mistakes, naming/style issues, and future extensibility.
-- Write or adjust GoogleTest test files and CMake test wiring when needed.
-- Use tests as red/green checkpoints: add focused failing tests first, then let the user implement, then verify.
-- Do not rewrite the user's production implementation just to impose style; suggest fixes first unless the user asks for cleanup.
-- It is acceptable for the assistant to edit documentation, tests, and narrow mechanical style issues after implementation is working.
+Default stance: the user should own production-code implementation as much as possible. The assistant
+should teach the Redis idea, invariants, byte/layout model, state transitions, and edge cases first,
+then use tests and review to help the user tighten the implementation details.
 
-For larger Redis-inspired structures such as `ziplist`, preserve the learning sequence: first teach the simplified model, then add Redis-like encoding details, then add edge cases such as cascading updates.
+Use this loop for learning-heavy work:
+
+- Define the small slice to build and the Redis concept it teaches.
+- Explain the core invariants before code is written.
+- Add or propose focused GoogleTest red/green checkpoints when useful.
+- Let the user implement production code in headers or sources first.
+- Review the user's implementation for correctness, undefined behavior, layout mistakes, parser state
+  mistakes, naming/style issues, and future extensibility.
+- Prefer hints, failing tests, and invariant-based explanations before directly patching production code.
+- Ask the user to fix the first one or two production-code iterations when the remaining issue is
+  educational and reasonably small.
+- Directly edit production code only when the user asks, when the user is blocked after iterative review,
+  or when the change is narrow mechanical cleanup after the implementation is working.
+
+The assistant may still directly edit documentation, tests, CMake wiring, and small mechanical style
+issues. Do not rewrite the user's working production implementation just to impose style.
+
+For larger Redis-inspired structures such as `ziplist`, preserve the learning sequence: first teach the
+simplified model, then add Redis-like encoding details, then add edge cases such as cascading updates.
+
+For AOF and future server work, keep the Redis lifecycle boundaries explicit: command parsing, command
+execution, write-command classification, append-only logging, replay, rewrite, client query buffers,
+reply buffers, and event-loop dispatch should be discussed as separate responsibilities before code is
+introduced.
 
 ## Coding Style & Naming Conventions
 
