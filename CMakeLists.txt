@@ -21,6 +21,7 @@ set(STORAGE_ENGINE_SOURCES
 set(SERVER_CORE_SOURCES
         src/server/client_context.cpp
         src/server/command_executor.cpp
+        src/server/resp_codec.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -76,6 +77,7 @@ set(HYPERREDIS_TESTS
         rdb_saver_test
         client_context_test
         command_executor_test
+        resp_codec_test
 )
 
 foreach (test_target IN LISTS HYPERREDIS_TESTS)

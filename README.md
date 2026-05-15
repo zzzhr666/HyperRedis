@@ -419,7 +419,7 @@ using RespValue = std::variant<
 - [x] 对 key、Set member、Hash field 排序，提升快照字节稳定性
 - [x] `RdbSaver` 文件保存与加载包装
 - [x] 文件级 round-trip、缺失文件和坏文件测试
-- [ ] checksum 校验
+- [x] checksum 校验
 
 ---
 
@@ -538,7 +538,6 @@ ctest --test-dir build --output-on-failure
 
 - 将 RDB-like 持久化接入未来服务器启动/关闭流程
 - 设计同步 `SAVE` 和基于 fork/COW 的 `BGSAVE` 入口
-- 清理命令执行器中重复的容器访问模式
 - 补齐 RESP 请求解析和响应序列化
 - 增加完整服务器目标和 TCP 连接管理
 
