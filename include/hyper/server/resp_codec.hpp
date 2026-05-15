@@ -8,8 +8,6 @@
 #include "hyper/server/resp_value.hpp"
 
 namespace hyper {
-
-
     [[nodiscard]] std::string serializeRespValue(const RespValue& value);
 
 
@@ -18,13 +16,14 @@ namespace hyper {
         Incomplete,
         Error
     };
+
     struct RespCommand {
         std::vector<std::string> args;
     };
 
     struct RespParseResult {
-        RespParseStatus status;
-        RespCommand command;
+        RespParseStatus status{};
+        RespCommand command{};
         std::size_t consumed{};
     };
 

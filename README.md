@@ -4,7 +4,7 @@
 
 这个仓库主要记录我在阅读《Redis 设计与实现》以及理解 Redis 源码过程中，对核心数据结构、对象系统、数据库和命令执行流程的手写实现与思考。目标不是做一个生产级 Redis 替代品，而是在保留 Redis 经典设计思想的前提下，用现代 C++ 重新表达原版 C 语言实现中的核心能力。
 
-当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、RESP 响应值模型和命令执行器。完整 TCP 服务器、RESP 请求解析和性能基准仍在后续计划中。
+当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、RESP 请求解析与响应序列化，以及命令执行器。完整 TCP 服务器和性能基准仍在后续计划中。
 
 ## 项目目标
 
@@ -113,6 +113,7 @@ HyperRedis/
 │   │   └── rdb_saver.hpp           # RDB-like 文件落盘包装
 │   └── server/                     # 未来服务器层之前的命令核心
 │       ├── resp_value.hpp          # RESP 响应值模型
+│       ├── resp_codec.hpp          # RESP 命令解析与响应序列化
 │       ├── client_context.hpp      # 客户端当前 DB 上下文
 │       └── command_executor.hpp    # Redis 命令执行器
 ├── src/
@@ -178,6 +179,7 @@ HyperRedis/
 | **RedisDb**            | 单个数据库，管理主字典、过期字典和键空间行为                           |
 | **RedisManager**       | 多 DB 管理，默认 16 个 DB                               |
 | **RedisClientContext** | 保存客户端当前 DB 选择                                    |
+| **RespCodec**          | RESP2 命令数组解析与 RESP 响应序列化                         |
 | **CommandExecutor**    | 命令入口，返回 RESP 风格响应模型                              |
 | **Snapshot**           | RDB-like 字节编解码，支持多 DB、过期元数据和五种对象类型 round-trip       |
 | **RdbSaver**           | 文件落盘包装，基于临时文件和 rename 写入 RDB-like 快照                  |
@@ -328,15 +330,17 @@ Redis 数据库中 key-value 数据和过期时间是分开存储的。HyperRedi
 
 时间相关代码使用 `std::chrono`，相比直接传递裸整数，能减少“秒、毫秒、绝对时间、相对时间”混用的问题。
 
-### 6. 命令层：脱离网络的可测试 Redis 行为
+### 6. RESP 编解码与命令层：脱离网络的可测试 Redis 行为
 
-当前项目还没有 TCP server，因此命令执行器不处理 socket，也不解析客户端 RESP 请求。它接收已经拆好的参数数组：
+当前项目还没有 TCP server，因此命令执行器仍不直接处理 socket。网络层未来只需要维护输入缓冲，把 RESP2 的命令数组交给 `parseRespCommand` 解析成参数数组：
 
 ```cpp
 using Args = std::span<const std::string_view>;
 ```
 
-然后返回统一的 RESP 值模型：
+`parseRespCommand` 当前聚焦 Redis 客户端常用命令帧：array of bulk strings，例如 `*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n`。解析结果会区分完整命令、半包和协议错误，并通过 `consumed` 告诉调用方当前输入缓冲应消费多少字节。
+
+命令执行器接收解析后的参数，然后返回统一的 RESP 值模型：
 
 ```cpp
 using RespValue = std::variant<
@@ -351,8 +355,9 @@ using RespValue = std::variant<
 这种拆分的好处是：
 
 - 命令语义可以不依赖网络层独立测试
+- RESP parser 可以独立测试半包、错误帧和连续命令缓冲
 - 错误、整数、bulk string、数组等响应类型有明确结构
-- 后续接入 RESP parser 和 TCP server 时，可以把网络层作为薄封装
+- 后续接入 TCP server 时，可以把网络层作为薄封装
 
 ---
 
@@ -409,7 +414,16 @@ using RespValue = std::variant<
 | Set | `SADD`、`SREM`、`SISMEMBER`、`SCARD`、`SMEMBERS`、`SPOP`、`SRANDMEMBER` |
 | ZSet | `ZADD`、`ZREM`、`ZSCORE`、`ZCARD`、`ZRANGE`、`ZRANK`、`ZREVRANK`、`ZCOUNT`、`ZREVRANGE`、`ZINCRBY`、`ZREMRANGEBYRANK`、`ZREMRANGEBYSCORE` |
 
-### F. RDB-like Snapshot / RdbSaver
+### F. RESP Codec
+
+- [x] `RespValue` 到 RESP2 wire 格式的序列化
+- [x] RESP2 array-of-bulk-strings 命令解析
+- [x] 区分 `Complete`、`Incomplete` 和 `Error`
+- [x] 返回 `consumed`，支持同一输入缓冲中拼接多条命令
+- [x] bulk string 按字节长度读取，支持内容包含 `\r\n` 和 `\0`
+- [x] 覆盖空数组、空 bulk、半包、非法长度和错误 CRLF 终止符
+
+### G. RDB-like Snapshot / RdbSaver
 
 - [x] `Snapshot` 接口
 - [x] header、DB 选择、过期时间和值对象保存与加载
@@ -434,6 +448,7 @@ using RespValue = std::variant<
 - 多 DB：`RedisManager` 与 `RedisClientContext`
 - RDB-like 持久化：`Snapshot` 字节 round-trip、`RdbSaver` 文件 round-trip 和坏文件保护
 - 命令层：命令分发、参数校验、wrong type、Redis 风格响应
+- RESP 编解码：响应序列化、命令数组解析、半包、错误帧、连续命令缓冲和二进制 bulk 参数
 
 运行方式：
 
@@ -445,7 +460,7 @@ ctest --test-dir build --output-on-failure
 
 ## 性能基准测试
 
-> 当前项目尚未接入网络层，也没有进行系统性 benchmark。这里先保留结构，后续在 RESP parser、TCP server 和持久化路径稳定后补充。
+> 当前项目尚未接入网络层，也没有进行系统性 benchmark。这里先保留结构，后续在 TCP server 和持久化路径稳定后补充。
 
 ### 待测试场景
 
@@ -507,7 +522,8 @@ ctest --test-dir build --output-on-failure
 | 维度 | Redis 原版 | HyperRedis |
 | --- | --- | --- |
 | 网络与命令 | 命令直接作用于客户端连接和 DB | 命令层暂时脱离网络 |
-| 回复写入 | 写入 client reply buffer | 返回 `RespValue` |
+| 请求读取 | 从客户端 query buffer 解析 RESP | `parseRespCommand` 解析 array-of-bulk-strings |
+| 回复写入 | 写入 client reply buffer | 返回 `RespValue`，由 `serializeRespValue` 序列化 |
 | 测试方式 | 集成式服务测试为主 | 命令执行器可直接单测 |
 
 ---
@@ -538,7 +554,7 @@ ctest --test-dir build --output-on-failure
 
 - 将 RDB-like 持久化接入未来服务器启动/关闭流程
 - 设计同步 `SAVE` 和基于 fork/COW 的 `BGSAVE` 入口
-- 补齐 RESP 请求解析和响应序列化
+- 将 RESP codec 接入未来 TCP server 的输入/输出缓冲
 - 增加完整服务器目标和 TCP 连接管理
 
 中长期方向：
