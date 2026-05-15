@@ -5,9 +5,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+#include "hyper/storage/checksum_calculator.hpp"
 
 namespace {
     struct SaveEntry {
@@ -104,6 +106,10 @@ namespace {
         void writeDouble(double value) {
             auto bits = std::bit_cast<std::uint64_t>(value);
             writeUint64BigEndian(bits);
+        }
+
+        [[nodiscard]] std::uint64_t calculateChecksum() const {
+            return hyper::ChecksumCalculator::calculate(buffer_);
         }
 
         void writeValue(const hyper::RedisObjectPtr& obj) {
@@ -419,7 +425,8 @@ std::vector<std::uint8_t> hyper::Snapshot::save(RedisManager& manager, ExpireTim
         }
     }
     writer.writeUint8(OpCode_EOF);
-    writer.writeCheckSum(0); //TODO: 添加校验机制
+    auto checksum = writer.calculateChecksum();
+    writer.writeCheckSum(checksum);
     return writer.finish();
 }
 
@@ -484,8 +491,8 @@ bool hyper::Snapshot::load(const std::vector<std::uint8_t>& data, RedisManager& 
     }
     reader.readUint8(); // read EOF
     auto checksum = reader.readChecksum();
-    if (!reader.keepSuccess() || checksum != 0 || !reader.atEnd()) {
-        //todo: 校验机制
+    auto target = ChecksumCalculator::calculate(std::span{data.data(), data.size() - sizeof(uint64_t)});
+    if (!reader.keepSuccess() || checksum != target || !reader.atEnd()) {
         return false;
     }
     manager.swapAll(current_manager);

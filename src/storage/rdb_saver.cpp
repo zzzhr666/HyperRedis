@@ -1,11 +1,12 @@
 #include "hyper/storage/rdb_saver.hpp"
 
 #include <fstream>
+#include <utility>
 
 #include "hyper/storage/snapshot.hpp"
 
 
-hyper::RdbSaver::RdbSaver(const std::filesystem::path& path) : path_(path) {}
+hyper::RdbSaver::RdbSaver(std::filesystem::path  path) : path_(std::move(path)) {}
 
 bool hyper::RdbSaver::save(RedisManager& manager, ExpireTimePoint now) const {
     auto bytes = Snapshot::save(manager, now);

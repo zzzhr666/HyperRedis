@@ -15,6 +15,7 @@ set(STORAGE_ENGINE_SOURCES
         src/storage/redis_manager.cpp
         src/storage/snapshot.cpp
         src/storage/rdb_saver.cpp
+        src/storage/checksum_calculator.cpp
 )
 
 set(SERVER_CORE_SOURCES

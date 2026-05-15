@@ -61,8 +61,8 @@ TEST(ObjectTest, AppendLogic) {
     // 测试从 Int 转换到 Raw 的追加
     auto obj = RedisObject::createSharedStringObject("100");
     EXPECT_EQ(obj->getEncoding(), ObjectEncoding::Int);
-    
-    obj->append("50"); 
+
+    obj->append("50");
     EXPECT_EQ(obj->getEncoding(), ObjectEncoding::Raw);
     EXPECT_EQ(obj->asString(), "10050");
 
@@ -234,7 +234,7 @@ TEST(ObjectTest, ListBasicOperations) {
     // 测试 LPUSH 和 RPOP
     listObj->listLeftPush(RedisObject::createSharedStringObject("first"));
     listObj->listLeftPush(RedisObject::createSharedStringObject("second"));
-    
+
     // 结构应该是: second -> first
     auto res1 = listObj->listRightPop();
     ASSERT_NE(res1, nullptr);
@@ -338,7 +338,7 @@ TEST(ObjectTest, ListRemove) {
     // 1. 删除前 2 个 "a" (from_front)
     EXPECT_EQ(listObj->listRemove(2, "a"), 2);
     EXPECT_EQ(listObj->listLen(), 3);
-    
+
     // 剩下: ["b", "c", "a"]
     EXPECT_EQ(listObj->listIndex(0)->asString(), "b");
     EXPECT_EQ(listObj->listIndex(1)->asString(), "c");
@@ -347,7 +347,7 @@ TEST(ObjectTest, ListRemove) {
     // 2. 删除所有 "a" (count = 0)
     EXPECT_EQ(listObj->listRemove(0, "a"), 1);
     EXPECT_EQ(listObj->listLen(), 2);
-    
+
     // 剩下: ["b", "c"]
     EXPECT_EQ(listObj->listIndex(0)->asString(), "b");
     EXPECT_EQ(listObj->listIndex(1)->asString(), "c");
@@ -356,7 +356,7 @@ TEST(ObjectTest, ListRemove) {
     listObj->listRightPush(RedisObject::createSharedStringObject("b"));
     listObj->listRightPush(RedisObject::createSharedStringObject("b"));
     // 现在: ["b", "c", "b", "b"]
-    
+
     // 删除最后 2 个 "b"
     EXPECT_EQ(listObj->listRemove(-2, "b"), 2);
     // 剩下: ["b", "c"]
@@ -375,7 +375,7 @@ TEST(ObjectTest, ListRemove) {
 
 TEST(ObjectTest, ListMixedTypeAndEncoding) {
     auto listObj = RedisObject::createSharedListObject();
-    
+
     // 存入字符串和数字
     listObj->listRightPush(RedisObject::createSharedStringObject("hello"));
     listObj->listRightPush(RedisObject::createSharedLongObject(100));
@@ -407,7 +407,7 @@ TEST(ObjectTest, ListAutomaticUpgrade) {
         ASSERT_NE(res, nullptr);
         EXPECT_EQ(res->asString(), std::to_string(i));
     }
-    
+
     EXPECT_EQ(listObj->listLeftPop(), nullptr);
 }
 
@@ -595,7 +595,7 @@ TEST(ObjectTest, StringAdvancedCommands) {
     auto obj7 = RedisObject::createSharedStringObject("hello");
     obj7->stringSetRange(1, "i");
     EXPECT_EQ(obj7->asString(), "hillo");
-    
+
     obj7->stringSetRange(7, "world");
     std::string expected = "hillo\0\0world";
     std::string actual = obj7->asString();
@@ -635,7 +635,7 @@ TEST(ObjectTest, ListTrim) {
         listObj->listRightPush(RedisObject::createSharedLongObject(i));
     }
     EXPECT_EQ(listObj->getEncoding(), ObjectEncoding::LinkedList);
-    
+
     listObj->listTrim(0, 9); // 保留前 10 个 (0-9)
     EXPECT_EQ(listObj->listLen(), 10);
     EXPECT_EQ(listObj->listIndex(0)->asString(), "0");
@@ -649,7 +649,7 @@ TEST(ObjectTest, SetRandomMember) {
         setObj->setAdd(std::to_string(i));
     }
     EXPECT_EQ(setObj->getEncoding(), ObjectEncoding::IntSet);
-    
+
     auto rand = setObj->setRandomMember();
     ASSERT_NE(rand, nullptr);
     EXPECT_TRUE(setObj->setContains(rand->asString()));
@@ -658,7 +658,7 @@ TEST(ObjectTest, SetRandomMember) {
     // 2. Test HashTable
     setObj->setAdd("hello"); // Trigger upgrade
     EXPECT_EQ(setObj->getEncoding(), ObjectEncoding::HashTable);
-    
+
     rand = setObj->setRandomMember();
     ASSERT_NE(rand, nullptr);
     EXPECT_TRUE(setObj->setContains(rand->asString()));
@@ -672,7 +672,7 @@ TEST(ObjectTest, SetPop) {
     for (const auto& m : members) {
         setObj->setAdd(m);
     }
-    
+
     auto popped = setObj->setPop();
     ASSERT_NE(popped, nullptr);
     EXPECT_TRUE(members.count(popped->asString()));
@@ -683,12 +683,12 @@ TEST(ObjectTest, SetPop) {
     setObj->setAdd("extra");
     setObj->setAdd("world"); // Force more members
     setObj->setAdd("trigger_upgrade"); // Just in case, though it might already be HashTable if mixed
-    
+
     // Ensure it's HashTable
     if (setObj->getEncoding() == ObjectEncoding::IntSet) {
         setObj->setAdd("force_hash");
     }
-    
+
     size_t initial_size = setObj->setSize();
     popped = setObj->setPop();
     ASSERT_NE(popped, nullptr);
@@ -698,12 +698,12 @@ TEST(ObjectTest, SetPop) {
 
 TEST(ObjectTest, ZSetAdvancedOps) {
     auto zsetObj = RedisObject::createSharedZSetObject();
-    
+
     // Initial data: a:10, b:20, c:30
     zsetObj->zSetAdd("a", 10.0);
     zsetObj->zSetAdd("b", 20.0);
     zsetObj->zSetAdd("c", 30.0);
-    
+
     // 1. ZREVRANK
     EXPECT_EQ(zsetObj->zSetRank("a"), 0);
     EXPECT_EQ(zsetObj->zSetRevRank("a"), 2);
