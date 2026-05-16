@@ -9,13 +9,26 @@
 namespace hyper {
     class RedisManager;
     class RedisClientContext;
+    constexpr std::string_view ErrEmptyCommand = "ERR empty command";
+    constexpr std::string_view ErrUnknownCommand = "ERR unknown command";
+    constexpr std::string_view ErrSyntaxError = "ERR syntax error";
+    constexpr std::string_view ErrWrongArity = "ERR wrong number of arguments";
+    constexpr std::string_view ErrInvalidDbIndex = "ERR invalid DB index";
+    constexpr std::string_view ErrInvalidInteger = "ERR value is not an integer or out of range";
+    constexpr std::string_view ErrInvalidFloat = "ERR value is not a valid float";
+    constexpr std::string_view ErrFloatResultInvalid = "ERR increment would produce NaN or Infinity";
+    constexpr std::string_view ErrNoSuchKey = "ERR no such key";
+    constexpr std::string_view ErrWrongType = "WRONGTYPE Operation against a key holding the wrong kind of value";
+    constexpr std::string_view ErrIndexOutOfRange = "ERR index out of range";
+    constexpr std::string_view ErrUnpositiveValue = "ERR value is out of range, must be positive";
+    constexpr std::string_view ErrCommandNotImplemented = "ERR command not implemented";
 
     class CommandExecutor {
     public:
         using Args = std::span<const std::string_view>;
 
-        RespValue execute(RedisManager& manager, RedisClientContext& client, Args args,
-                          ExpireTimePoint now) const;
+        [[nodiscard]] RespValue execute(RedisManager& manager, RedisClientContext& client, Args args,
+                                        ExpireTimePoint now) const;
 
     private:
         // --- Generic / Database / Connection ---

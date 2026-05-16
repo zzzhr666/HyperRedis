@@ -3,8 +3,10 @@
 #include "hyper/server/resp_codec.hpp"
 #include "hyper/server/resp_value.hpp"
 
+#include <array>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace hyper;
@@ -68,6 +70,36 @@ TEST(RespCodecTest, SerializesNullArray) {
     std::shared_ptr<RespArray> array;
 
     EXPECT_EQ(serializeRespValue(array), "*-1\r\n");
+}
+
+TEST(RespCodecTest, SerializesRespCommand) {
+    const std::array<std::string_view, 3> args{"SET", "key", "value"};
+
+    EXPECT_EQ(serializeRespCommand(args), "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n");
+}
+
+TEST(RespCodecTest, SerializesRespCommandWithEmptyArgument) {
+    const std::array<std::string_view, 2> args{"SET", ""};
+
+    EXPECT_EQ(serializeRespCommand(args), "*2\r\n$3\r\nSET\r\n$0\r\n\r\n");
+}
+
+TEST(RespCodecTest, SerializesRespCommandUsingRawByteLength) {
+    const std::array<std::string_view, 2> args{"SET", "a\r\nb"};
+
+    EXPECT_EQ(serializeRespCommand(args), "*2\r\n$3\r\nSET\r\n$4\r\na\r\nb\r\n");
+}
+
+TEST(RespCodecTest, SerializedRespCommandRoundTripsBinaryArguments) {
+    const std::string binary_arg("a\0b", 3);
+    const std::array<std::string_view, 2> args{"SET", std::string_view(binary_arg.data(), binary_arg.size())};
+
+    const auto bytes = serializeRespCommand(args);
+    const auto result = parseRespCommand(bytes);
+
+    ASSERT_EQ(result.status, RespParseStatus::Complete);
+    EXPECT_EQ(result.command.args, (std::vector<std::string>{"SET", binary_arg}));
+    EXPECT_EQ(result.consumed, bytes.size());
 }
 
 TEST(RespCodecTest, ParsesSingleBulkCommand) {

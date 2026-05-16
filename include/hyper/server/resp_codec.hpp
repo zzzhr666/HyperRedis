@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <span>
 #include <vector>
 
 #include "hyper/server/resp_value.hpp"
@@ -27,5 +28,7 @@ namespace hyper {
         std::size_t consumed{};
     };
 
-    [[nodiscard]] RespParseResult parseRespCommand(std::string_view input); //todo
+    [[nodiscard]] RespParseResult parseRespCommand(std::string_view input);
+
+    [[nodiscard]] std::string serializeRespCommand(std::span<const std::string_view> args);
 }

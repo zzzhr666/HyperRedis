@@ -165,3 +165,14 @@ hyper::RespParseResult hyper::parseRespCommand(std::string_view input) {
     res.status = RespParseStatus::Complete;
     return res;
 }
+
+std::string hyper::serializeRespCommand(std::span<const std::string_view> args) {
+    std::string output{};
+    output.append("*" + std::to_string(args.size()) + "\r\n");
+    for (const auto& arg : args) {
+        output.append("$" + std::to_string(arg.size()) + "\r\n");
+        output.append(arg);
+        output.append("\r\n");
+    }
+    return output;
+}

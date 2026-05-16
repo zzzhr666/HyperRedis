@@ -4,7 +4,7 @@
 
 这个仓库主要记录我在阅读《Redis 设计与实现》以及理解 Redis 源码过程中，对核心数据结构、对象系统、数据库和命令执行流程的手写实现与思考。目标不是做一个生产级 Redis 替代品，而是在保留 Redis 经典设计思想的前提下，用现代 C++ 重新表达原版 C 语言实现中的核心能力。
 
-当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、RESP 请求解析与响应序列化，以及命令执行器。完整 TCP 服务器和性能基准仍在后续计划中。
+当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、AOF-like 追加日志与重放、RESP 请求解析与响应序列化，以及命令执行协调层。完整 TCP 服务器和性能基准仍在后续计划中。
 
 ## 项目目标
 
@@ -65,30 +65,33 @@ cmake --build /tmp/hyperredis-check
 ctest --test-dir /tmp/hyperredis-check --output-on-failure
 ```
 
-### 4. 通过命令执行器使用核心能力
+### 4. 通过命令处理器使用核心能力
 
-当前还没有独立 Redis 服务器可执行目标，推荐通过 `RedisManager`、`RedisClientContext` 和 `CommandExecutor` 直接使用核心能力：
+当前还没有独立 Redis 服务器可执行目标，推荐通过 `RedisManager`、`RedisClientContext` 和 `CommandProcessor` 直接使用核心能力。`CommandProcessor` 会调用 `CommandExecutor` 执行命令，并在配置了 `AofAppender` 时把成功写命令追加到 AOF 文件：
 
 ```cpp
 #include "hyper/server/client_context.hpp"
-#include "hyper/server/command_executor.hpp"
+#include "hyper/server/command_processor.hpp"
+#include "hyper/storage/aof_appender.hpp"
 #include "hyper/storage/redis_manager.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <string_view>
 #include <vector>
 
 int main() {
     hyper::RedisManager manager;
     hyper::RedisClientContext client;
-    hyper::CommandExecutor executor;
+    hyper::AofAppender appender(std::filesystem::path{"appendonly.aof"});
+    hyper::CommandProcessor processor(&appender);
     const auto now = hyper::ExpireClock::now();
 
     std::vector<std::string_view> set_args{"SET", "name", "hyper"};
-    executor.execute(manager, client, set_args, now);
+    processor.execute(manager, client, set_args, now);
 
     std::vector<std::string_view> get_args{"GET", "name"};
-    auto reply = executor.execute(manager, client, get_args, now);
+    auto reply = processor.execute(manager, client, get_args, now);
 }
 ```
 
@@ -110,12 +113,16 @@ HyperRedis/
 │   │   ├── database.hpp            # RedisDb、过期字典、TTL
 │   │   ├── redis_manager.hpp       # 多 DB 管理
 │   │   ├── snapshot.hpp            # RDB-like 字节编解码
-│   │   └── rdb_saver.hpp           # RDB-like 文件落盘包装
+│   │   ├── rdb_saver.hpp           # RDB-like 文件落盘包装
+│   │   ├── aof_appender.hpp        # AOF-like 命令追加
+│   │   └── aof_replayer.hpp        # AOF-like 命令重放
 │   └── server/                     # 未来服务器层之前的命令核心
 │       ├── resp_value.hpp          # RESP 响应值模型
 │       ├── resp_codec.hpp          # RESP 命令解析与响应序列化
 │       ├── client_context.hpp      # 客户端当前 DB 上下文
-│       └── command_executor.hpp    # Redis 命令执行器
+│       ├── command_registry.hpp    # 命令元信息与写命令分类
+│       ├── command_executor.hpp    # Redis 命令执行器
+│       └── command_processor.hpp   # 执行命令并协调 AOF 追加
 ├── src/
 │   ├── storage/                    # 存储与对象实现
 │   └── server/                     # 命令执行核心实现
@@ -131,7 +138,8 @@ HyperRedis/
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                         Command Layer                        │
-│  CommandExecutor                                             │
+│  CommandProcessor / CommandExecutor                          │
+│  - 写命令分类与 AOF 追加协调                                   │
 │  - 参数校验                                                   │
 │  - 命令分发                                                   │
 │  - Redis 风格错误与 RespValue 响应                             │
@@ -180,9 +188,13 @@ HyperRedis/
 | **RedisManager**       | 多 DB 管理，默认 16 个 DB                               |
 | **RedisClientContext** | 保存客户端当前 DB 选择                                    |
 | **RespCodec**          | RESP2 命令数组解析与 RESP 响应序列化                         |
+| **CommandRegistry**    | 命令元信息、arity 和写命令分类                              |
 | **CommandExecutor**    | 命令入口，返回 RESP 风格响应模型                              |
+| **CommandProcessor**   | 调用命令执行器，并在成功写命令后协调 AOF 追加                    |
 | **Snapshot**           | RDB-like 字节编解码，支持多 DB、过期元数据和五种对象类型 round-trip       |
 | **RdbSaver**           | 文件落盘包装，基于临时文件和 rename 写入 RDB-like 快照                  |
+| **AofAppender**        | 将成功写命令以 RESP 命令帧追加到 AOF-like 文件，处理 DB 切换 `SELECT` |
+| **AofReplayer**        | 读取 AOF-like 文件并通过同一命令执行路径重放到临时 manager              |
 
 ---
 
@@ -330,7 +342,7 @@ Redis 数据库中 key-value 数据和过期时间是分开存储的。HyperRedi
 
 时间相关代码使用 `std::chrono`，相比直接传递裸整数，能减少“秒、毫秒、绝对时间、相对时间”混用的问题。
 
-### 6. RESP 编解码与命令层：脱离网络的可测试 Redis 行为
+### 6. RESP 编解码、命令层与 AOF：脱离网络的可测试 Redis 行为
 
 当前项目还没有 TCP server，因此命令执行器仍不直接处理 socket。网络层未来只需要维护输入缓冲，把 RESP2 的命令数组交给 `parseRespCommand` 解析成参数数组：
 
@@ -358,6 +370,15 @@ using RespValue = std::variant<
 - RESP parser 可以独立测试半包、错误帧和连续命令缓冲
 - 错误、整数、bulk string、数组等响应类型有明确结构
 - 后续接入 TCP server 时，可以把网络层作为薄封装
+
+AOF-like 路径复用同一套命令表示：
+
+```text
+argv -> serializeRespCommand -> AOF 文件
+AOF 文件 -> parseRespCommand -> CommandExecutor replay
+```
+
+`CommandProcessor` 是在线写路径的协调层：它先通过 `CommandRegistry` 判断命令是否属于写命令，再调用 `CommandExecutor` 执行；只有命令执行成功且配置了 `AofAppender` 时，才把原始 argv 追加到 AOF 文件。`AofReplayer` 重放时不会直接修改 `RedisDb`，而是解析 AOF 中的 RESP 命令帧，并通过同一个 `CommandExecutor` 路径恢复数据。
 
 ---
 
@@ -399,7 +420,9 @@ using RespValue = std::variant<
 - [x] `RedisManager` 多 DB 管理，默认 16 个 DB
 - [x] `RedisClientContext` 保存客户端当前 DB 选择
 
-### E. 命令执行器
+### E. 命令执行与处理
+
+`CommandRegistry` 保存命令元信息，包括命令名、arity 和写命令分类。`CommandExecutor` 负责命令参数校验、分发和实际数据修改。`CommandProcessor` 在 `CommandExecutor` 外侧协调 AOF 追加，因此命令执行逻辑和持久化策略保持分离。
 
 `CommandExecutor` 已支持命令名大小写归一、参数数量校验、Redis 风格错误返回和 `RespValue` 响应模型。
 
@@ -418,6 +441,7 @@ using RespValue = std::variant<
 
 - [x] `RespValue` 到 RESP2 wire 格式的序列化
 - [x] RESP2 array-of-bulk-strings 命令解析
+- [x] 命令 argv 到 RESP2 array-of-bulk-strings 的无损序列化
 - [x] 区分 `Complete`、`Incomplete` 和 `Error`
 - [x] 返回 `consumed`，支持同一输入缓冲中拼接多条命令
 - [x] bulk string 按字节长度读取，支持内容包含 `\r\n` 和 `\0`
@@ -435,6 +459,18 @@ using RespValue = std::variant<
 - [x] 文件级 round-trip、缺失文件和坏文件测试
 - [x] checksum 校验
 
+### H. AOF-like Append / Replay
+
+- [x] `AofAppender` 将成功写命令以 RESP 命令帧追加到文件
+- [x] DB 切换时自动写入 `SELECT <db>`，连续同 DB 写命令不重复写 `SELECT`
+- [x] `AofReplayer` 读取 AOF 文件，解析 RESP 命令并通过 `CommandExecutor` 重放
+- [x] replay 使用临时 `RedisManager`，成功后再 `swapAll`，坏文件或命令错误不会污染原 manager
+- [x] `CommandProcessor` 在线路径：执行命令后对成功写命令追加 AOF
+- [x] append 失败时返回 `ERR append only file write failed`
+- [ ] AOF broken 状态：append 失败后拒绝后续写命令
+- [ ] appendfsync 策略：`no` / `always` / `everysec`
+- [ ] AOF rewrite：从当前 DB 状态生成紧凑命令序列
+
 ---
 
 ## 测试覆盖
@@ -447,6 +483,7 @@ using RespValue = std::variant<
 - 数据库层：过期、TTL/PTTL、rename、random key、active expire
 - 多 DB：`RedisManager` 与 `RedisClientContext`
 - RDB-like 持久化：`Snapshot` 字节 round-trip、`RdbSaver` 文件 round-trip 和坏文件保护
+- AOF-like 持久化：命令追加、DB 切换、重放恢复、坏文件保护、命令错误保护和 append 失败语义
 - 命令层：命令分发、参数校验、wrong type、Redis 风格响应
 - RESP 编解码：响应序列化、命令数组解析、半包、错误帧、连续命令缓冲和二进制 bulk 参数
 
@@ -521,10 +558,20 @@ ctest --test-dir build --output-on-failure
 
 | 维度 | Redis 原版 | HyperRedis |
 | --- | --- | --- |
-| 网络与命令 | 命令直接作用于客户端连接和 DB | 命令层暂时脱离网络 |
+| 网络与命令 | 命令直接作用于客户端连接和 DB | 命令层暂时脱离网络，`CommandProcessor` 协调执行与 AOF |
 | 请求读取 | 从客户端 query buffer 解析 RESP | `parseRespCommand` 解析 array-of-bulk-strings |
 | 回复写入 | 写入 client reply buffer | 返回 `RespValue`，由 `serializeRespValue` 序列化 |
 | 测试方式 | 集成式服务测试为主 | 命令执行器可直接单测 |
+
+### 6. AOF
+
+| 维度 | Redis 原版 | HyperRedis |
+| --- | --- | --- |
+| 在线追加 | 成功写命令追加到 AOF buffer / 文件 | `CommandProcessor` 调用 `AofAppender` 追加 RESP 命令帧 |
+| 重放 | 解析 AOF 并走命令执行路径 | `AofReplayer` 使用 `parseRespCommand` + `CommandExecutor` |
+| DB 选择 | AOF 中写入 `SELECT` 恢复 DB 上下文 | `AofAppender` 在 DB 切换时写入 `SELECT` |
+| 失败保护 | 持久化错误会影响后续写入策略 | 当前返回 AOF 错误，后续计划加入 broken 状态 |
+| Rewrite / fsync | 支持 rewrite 和多种 fsync 策略 | 尚未实现，保留为后续学习切片 |
 
 ---
 
@@ -552,7 +599,10 @@ ctest --test-dir build --output-on-failure
 
 近期重点：
 
-- 将 RDB-like 持久化接入未来服务器启动/关闭流程
+- 增加 AOF broken 状态，append 失败后拒绝后续写命令
+- 实现 AOF rewrite，从当前 DB 状态生成紧凑命令序列
+- 增加 AOF fsync 策略配置
+- 将 RDB-like / AOF-like 持久化接入未来服务器启动/关闭流程
 - 设计同步 `SAVE` 和基于 fork/COW 的 `BGSAVE` 入口
 - 将 RESP codec 接入未来 TCP server 的输入/输出缓冲
 - 增加完整服务器目标和 TCP 连接管理
@@ -560,7 +610,7 @@ ctest --test-dir build --output-on-failure
 中长期方向：
 
 - 接入事件驱动网络层，实现可运行 Redis-like server
-- 增加持久化校验和更完整的 RDB-like 格式支持
+- 增加持久化校验和更完整的 RDB-like / AOF-like 格式支持
 - 补充 Redis 行为兼容测试
 - 增加 benchmark，量化内存结构和命令执行性能
 - 继续对照 Redis 源码补齐更多命令和边界语义

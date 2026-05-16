@@ -16,12 +16,16 @@ set(STORAGE_ENGINE_SOURCES
         src/storage/snapshot.cpp
         src/storage/rdb_saver.cpp
         src/storage/checksum_calculator.cpp
+        src/storage/aof_appender.cpp
+        src/storage/aof_replayer.cpp
 )
 
 set(SERVER_CORE_SOURCES
         src/server/client_context.cpp
         src/server/command_executor.cpp
         src/server/resp_codec.cpp
+        src/server/command_registry.cpp
+        src/server/command_processor.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -75,7 +79,10 @@ set(HYPERREDIS_TESTS
         redis_manager_test
         snapshot_test
         rdb_saver_test
+        aof_appender_test
+        aof_replayer_test
         client_context_test
+        command_processor_test
         command_executor_test
         resp_codec_test
 )
