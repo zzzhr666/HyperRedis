@@ -25,10 +25,13 @@ hyper::RespValue hyper::CommandProcessor::execute(RedisManager& manager, RedisCl
         return respError(std::string(ErrUnknownCommand));
     }
     std::size_t current_db_index = client.dbIndex();
+    if (search_res->write && appender_ != nullptr && appender_->isBroken()) {
+        return respError(std::string(ErrAofWriteFailed));
+    }
     auto ret = executor_.execute(manager, client, args, now);
     if (!std::holds_alternative<RespError>(ret) && search_res->write && appender_ != nullptr) {
-        if (!appender_->appendCommand(current_db_index, args)) {
-            return respError("ERR append only file write failed");
+        if (!appender_->appendCommand(current_db_index, args, now)) {
+            return respError(std::string(ErrAofWriteFailed));
         }
     }
     return ret;

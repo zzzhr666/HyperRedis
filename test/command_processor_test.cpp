@@ -168,3 +168,49 @@ TEST(CommandProcessorTest, AppendFailureReturnsErrorAfterWriteCommandExecutes) {
 
     std::filesystem::remove_all(path);
 }
+
+TEST(CommandProcessorTest, BrokenAppenderRejectsLaterWriteCommandBeforeExecution) {
+    const auto path = testPath("hyperredis-command-processor-broken-aof.aof");
+    std::filesystem::remove_all(path);
+    ASSERT_TRUE(std::filesystem::create_directory(path));
+
+    RedisManager manager(1);
+    RedisClientContext client;
+    AofAppender appender(path);
+    CommandProcessor processor(&appender);
+    const std::array<std::string_view, 3> first_set{"SET", "first", "value"};
+    const std::array<std::string_view, 3> second_set{"SET", "second", "value"};
+
+    expectError(processor.execute(manager, client, first_set, makeTime(1'000)),
+                "ERR append only file write failed");
+
+    std::filesystem::remove_all(path);
+
+    expectError(processor.execute(manager, client, second_set, makeTime(1'000)),
+                "ERR append only file write failed");
+
+    ASSERT_NE(manager.db(0), nullptr);
+    EXPECT_EQ(manager.db(0)->get("second", makeTime(1'000)), nullptr);
+}
+
+TEST(CommandProcessorTest, BrokenAppenderStillAllowsReadCommand) {
+    const auto path = testPath("hyperredis-command-processor-broken-aof-read.aof");
+    std::filesystem::remove_all(path);
+    ASSERT_TRUE(std::filesystem::create_directory(path));
+
+    RedisManager manager(1);
+    RedisClientContext client;
+    ASSERT_NE(manager.db(0), nullptr);
+    manager.db(0)->set("key", RedisObject::createSharedStringObject("value"));
+    AofAppender appender(path);
+    CommandProcessor processor(&appender);
+    const std::array<std::string_view, 3> set_args{"SET", "first", "value"};
+    const std::array<std::string_view, 2> get_args{"GET", "key"};
+
+    expectError(processor.execute(manager, client, set_args, makeTime(1'000)),
+                "ERR append only file write failed");
+
+    expectBulkString(processor.execute(manager, client, get_args, makeTime(1'000)), "value");
+
+    std::filesystem::remove_all(path);
+}

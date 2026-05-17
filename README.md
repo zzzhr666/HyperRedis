@@ -467,8 +467,9 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 - [x] replay 使用临时 `RedisManager`，成功后再 `swapAll`，坏文件或命令错误不会污染原 manager
 - [x] `CommandProcessor` 在线路径：执行命令后对成功写命令追加 AOF
 - [x] append 失败时返回 `ERR append only file write failed`
-- [ ] AOF broken 状态：append 失败后拒绝后续写命令
-- [ ] appendfsync 策略：`no` / `always` / `everysec`
+- [x] AOF broken 状态：append 失败后拒绝后续写命令
+- [x] appendfsync 策略：`no` / `always`
+- [x] appendfsync 策略：`everysec`
 - [ ] AOF rewrite：从当前 DB 状态生成紧凑命令序列
 
 ---
@@ -599,9 +600,7 @@ ctest --test-dir build --output-on-failure
 
 近期重点：
 
-- 增加 AOF broken 状态，append 失败后拒绝后续写命令
 - 实现 AOF rewrite，从当前 DB 状态生成紧凑命令序列
-- 增加 AOF fsync 策略配置
 - 将 RDB-like / AOF-like 持久化接入未来服务器启动/关闭流程
 - 设计同步 `SAVE` 和基于 fork/COW 的 `BGSAVE` 入口
 - 将 RESP codec 接入未来 TCP server 的输入/输出缓冲

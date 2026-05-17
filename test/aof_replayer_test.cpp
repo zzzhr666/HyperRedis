@@ -44,7 +44,7 @@ TEST(AofReplayerTest, ReplayRestoresStringCommand) {
 
     AofAppender appender(path);
     const std::array<std::string_view, 3> args{"SET", "key", "value"};
-    ASSERT_TRUE(appender.appendCommand(0, args));
+    ASSERT_TRUE(appender.appendCommand(0, args, makeTime(1'000)));
 
     RedisManager manager(1);
     AofReplayer replayer(path);
@@ -63,7 +63,7 @@ TEST(AofReplayerTest, ReplayRestoresSelectedDatabases) {
 
     AofAppender appender(path);
     const std::array<std::string_view, 3> args{"SET", "key", "db1"};
-    ASSERT_TRUE(appender.appendCommand(1, args));
+    ASSERT_TRUE(appender.appendCommand(1, args, makeTime(1'000)));
 
     RedisManager manager(2);
     AofReplayer replayer(path);

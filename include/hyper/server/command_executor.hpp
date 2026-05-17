@@ -22,6 +22,7 @@ namespace hyper {
     constexpr std::string_view ErrIndexOutOfRange = "ERR index out of range";
     constexpr std::string_view ErrUnpositiveValue = "ERR value is out of range, must be positive";
     constexpr std::string_view ErrCommandNotImplemented = "ERR command not implemented";
+    constexpr std::string_view ErrAofWriteFailed = "ERR append only file write failed";
 
     class CommandExecutor {
     public:
