@@ -27,6 +27,7 @@ set(SERVER_CORE_SOURCES
         src/server/resp_codec.cpp
         src/server/command_registry.cpp
         src/server/command_processor.cpp
+        src/server/event_loop.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -87,6 +88,7 @@ set(HYPERREDIS_TESTS
         command_processor_test
         command_executor_test
         resp_codec_test
+        event_loop_test
 )
 
 foreach (test_target IN LISTS HYPERREDIS_TESTS)

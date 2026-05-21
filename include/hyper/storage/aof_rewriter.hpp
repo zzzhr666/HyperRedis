@@ -11,6 +11,7 @@ namespace hyper {
     public:
         explicit AofRewriter(std::filesystem::path path);
 
+        // Writes a complete rewritten AOF to path_; caller owns atomic replacement.
         [[nodiscard]] bool rewrite(RedisManager& manager, ExpireTimePoint now) const;
 
     private:
