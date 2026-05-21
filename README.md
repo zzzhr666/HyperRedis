@@ -4,7 +4,7 @@
 
 这个仓库主要记录我在阅读《Redis 设计与实现》以及理解 Redis 源码过程中，对核心数据结构、对象系统、数据库和命令执行流程的手写实现与思考。目标不是做一个生产级 Redis 替代品，而是在保留 Redis 经典设计思想的前提下，用现代 C++ 重新表达原版 C 语言实现中的核心能力。
 
-当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、AOF-like 追加日志与重放、AOF rewrite、RESP 请求解析与响应序列化，以及命令执行协调层。完整 TCP 服务器、后台持久化任务和性能基准仍在后续计划中。
+当前项目重点是 `HyperRedisCore`：一个不依赖完整网络服务器的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、AOF-like 追加日志与重放、AOF rewrite、RESP 请求解析与响应序列化、命令执行协调层，以及一个可测试的 `poll`-based 文件事件循环。完整 TCP 服务器、客户端连接状态、后台持久化任务和性能基准仍在后续计划中。
 
 ## 项目目标
 
@@ -123,7 +123,8 @@ HyperRedis/
 │       ├── client_context.hpp      # 客户端当前 DB 上下文
 │       ├── command_registry.hpp    # 命令元信息与写命令分类
 │       ├── command_executor.hpp    # Redis 命令执行器
-│       └── command_processor.hpp   # 执行命令并协调 AOF 追加
+│       ├── command_processor.hpp   # 执行命令并协调 AOF 追加
+│       └── event_loop.hpp          # 文件事件循环，支持 readable / writable 回调
 ├── src/
 │   ├── storage/                    # 存储与对象实现
 │   └── server/                     # 命令执行核心实现
@@ -144,6 +145,14 @@ HyperRedis/
 │  - 参数校验                                                   │
 │  - 命令分发                                                   │
 │  - Redis 风格错误与 RespValue 响应                             │
+└───────────────────────────────┬──────────────────────────────┘
+                                │
+┌───────────────────────────────▼──────────────────────────────┐
+│                         Event Layer                          │
+│  EventLoop                                                    │
+│  - fd -> readable / writable callback 注册表                  │
+│  - poll 快照等待与事件分发                                     │
+│  - callback 内安全删除事件                                     │
 └───────────────────────────────┬──────────────────────────────┘
                                 │
 ┌───────────────────────────────▼──────────────────────────────┐
@@ -192,6 +201,7 @@ HyperRedis/
 | **CommandRegistry**    | 命令元信息、arity 和写命令分类                              |
 | **CommandExecutor**    | 命令入口，返回 RESP 风格响应模型                              |
 | **CommandProcessor**   | 调用命令执行器，并在成功写命令后协调 AOF 追加                    |
+| **EventLoop**          | `poll`-based 文件事件循环，维护 fd 事件注册表并分发 readable / writable callback |
 | **Snapshot**           | RDB-like 字节编解码，支持多 DB、过期元数据和五种对象类型 round-trip       |
 | **RdbSaver**           | 文件落盘包装，基于临时文件和 rename 写入 RDB-like 快照                  |
 | **AofAppender**        | 将成功写命令以 RESP 命令帧追加到 AOF-like 文件，处理 DB 切换 `SELECT` |
@@ -384,6 +394,8 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 
 `AofRewriter` 则从当前数据库状态重新生成紧凑命令序列：String 使用 `SET`，List 使用 `RPUSH`，Hash 使用 `HSET`，Set 使用 `SADD`，ZSet 使用 `ZADD`。如果 key 带有过期时间，rewrite 会追加 `PEXPIREAT key unix_ms`，保存绝对过期时间而不是剩余 TTL，避免 rewrite 或 replay 延迟导致 key 被错误续命。
 
+事件循环目前是服务器层的第一块基础设施。`EventLoop` 维护 fd 到 readable / writable callback 的注册表，每次 `runOnce` 都从注册表构造 `pollfd` 快照，通过 `poll()` 等待就绪事件，并在分发前重新检查 fd 当前是否仍然存在、是否仍关注该事件。这保证了 callback 内调用 `removeFileEvent` 是安全的。它不拥有 fd，也不负责 socket 创建、关闭、RESP 解析或命令执行；这些职责会在后续 `ClientConnection` 和 TCP server 层补上。
+
 ---
 
 ## 已实现功能
@@ -478,6 +490,15 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 - [x] AOF rewrite 覆盖 String / List / Hash / Set / ZSet
 - [x] AOF rewrite 使用 `PEXPIREAT` 保存绝对过期时间，避免 rewrite/replay 延迟导致 TTL 语义漂移
 
+### I. 文件事件循环
+
+- [x] `EventLoop` 文件事件注册表
+- [x] `FileEventMask` 支持 `Readable` / `Writable` 组合
+- [x] 基于 `poll()` 的 `runOnce`
+- [x] readable / writable callback 分槽注册与分发
+- [x] 支持删除单个 fd 上的部分事件 mask
+- [x] callback 内删除事件时保持分发安全
+
 ---
 
 ## 测试覆盖
@@ -493,6 +514,7 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 - AOF-like 持久化：命令追加、DB 切换、重放恢复、rewrite、绝对过期时间恢复、坏文件保护、命令错误保护和 append 失败语义
 - 命令层：命令分发、参数校验、wrong type、Redis 风格响应
 - RESP 编解码：响应序列化、命令数组解析、半包、错误帧、连续命令缓冲和二进制 bulk 参数
+- 事件循环：readable / writable 触发、事件删除、同 fd 部分 mask 删除、callback 内删除事件
 
 运行方式：
 
@@ -605,19 +627,20 @@ ctest --test-dir build --output-on-failure
 
 ## 后续计划
 
-后续任务按《Redis 设计与实现》的学习节奏，从持久化核心过渡到事件系统、客户端和服务器生命周期。`BGSAVE` 与 `BGWRITEAOF` 暂不作为下一步直接实现目标，它们依赖后台任务状态、serverCron 检查、rewrite buffer 和原子替换流程，更适合在服务器骨架稳定后推进。
+后续任务按《Redis 设计与实现》的学习节奏，从持久化核心和文件事件循环继续过渡到客户端状态、服务器生命周期和时间事件。`BGSAVE` 与 `BGWRITEAOF` 暂不作为下一步直接实现目标，它们依赖后台任务状态、serverCron 检查、rewrite buffer 和原子替换流程，更适合在服务器骨架稳定后推进。
 
 ### 近期任务流
 
-- [ ] 设计 `ServerCron` / time event 骨架：周期触发主动过期、AOF everysec fsync、未来后台任务检查
-- [ ] 增加最小 `RedisServer` 状态对象：持有 `RedisManager`、持久化配置、AOF/RDB 组件、dirty counter 和时间状态
-- [ ] 将 RDB-like / AOF-like 持久化接入服务器启动/关闭流程：启动时按配置加载 RDB/AOF，关闭时执行同步保存或关闭 AOF
 - [ ] 设计客户端输入/输出缓冲对象：query buffer、reply buffer、当前 DB、RESP command 解析结果
+- [ ] 接入 RESP codec 到客户端 query buffer，支持半包和连续命令
+- [ ] 增加最小 `RedisServer` 状态对象：持有 `RedisManager`、持久化配置、AOF/RDB 组件、dirty counter 和时间状态
+- [ ] 设计 `ServerCron` / time event 骨架：周期触发主动过期、AOF everysec fsync、未来后台任务检查
+- [ ] 将 RDB-like / AOF-like 持久化接入服务器启动/关闭流程：启动时按配置加载 RDB/AOF，关闭时执行同步保存或关闭 AOF
 
 ### 服务器与事件系统
 
-- [ ] 实现文件事件抽象：readable/writable callback，先保留可测试接口，再决定 `poll` / `epoll` 实现
-- [ ] 接入 RESP codec 到客户端 query buffer，支持半包和连续命令
+- [x] 实现文件事件抽象：readable/writable callback，使用 `poll` 建立可测试第一版
+- [ ] 将 `EventLoop` 接入客户端连接表
 - [ ] 增加最小 TCP server 目标：accept、read、execute、write RESP reply
 - [ ] 将 `CommandProcessor` 接入真实连接，让网络层只负责 buffer 和事件调度
 
