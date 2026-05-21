@@ -48,9 +48,13 @@ namespace hyper {
             return main_dict_.size();
         }
 
+
+
         bool expireAt(std::string_view key, ExpireTimePoint now, ExpireTimePoint deadline, ExpireCondition condition = ExpireCondition::Always);
 
         bool expireAfter(std::string_view key, Milliseconds ttl, ExpireTimePoint now, ExpireCondition condition = ExpireCondition::Always);
+
+        [[nodiscard]] std::optional<UnixMilliseconds> expireTime(std::string_view key,ExpireTimePoint now);
 
         [[nodiscard]] UnixMilliseconds pttl(std::string_view key, ExpireTimePoint now);
 

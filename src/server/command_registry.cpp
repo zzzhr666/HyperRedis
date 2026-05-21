@@ -7,7 +7,7 @@
 namespace {
     constexpr auto makeRegistry() {
 
-        constexpr std::size_t CommandNumber = 66;
+        constexpr std::size_t CommandNumber = 67;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -36,6 +36,7 @@ namespace {
                 {"MGET", 2, hyper::UnlimitedArity, hyper::CommandName::MGet, false},
                 {"MSET", 3, hyper::UnlimitedArity, hyper::CommandName::MSet, true},
                 {"PEXPIRE", 3, 4, hyper::CommandName::PExpire, true},
+                {"PEXPIREAT", 3, 4, hyper::CommandName::PExpireAt, true},
                 {"PERSIST", 2, 2, hyper::CommandName::Persist, true},
                 {"PING", 1, 2, hyper::CommandName::Ping, false},
                 {"PTTL", 2, 2, hyper::CommandName::Pttl, false},

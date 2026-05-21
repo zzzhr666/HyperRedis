@@ -230,6 +230,8 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
         return expire_(manager, client, args, now);
     case CommandName::PExpire:
         return pExpire_(manager, client, args, now);
+    case CommandName::PExpireAt:
+        return pExpireAt_(manager, client, args, now);
     case CommandName::ZAdd:
         return zAdd_(manager, client, args, now);
     case CommandName::ZCard:
@@ -400,6 +402,26 @@ hyper::RespValue hyper::CommandExecutor::pExpire_(RedisManager& manager, RedisCl
     auto milliseconds = parseExpireDuration(args[2], 1);
     if (milliseconds.has_value()) {
         return respInteger(db->expireAfter(args[1], milliseconds.value(), now, condition) ? 1 : 0);
+    }
+    return commandError(ErrInvalidInteger);
+}
+
+hyper::RespValue hyper::CommandExecutor::pExpireAt_(RedisManager& manager, RedisClientContext& client, Args args,
+                                                    ExpireTimePoint now) const {
+    auto db = client.currentDb(manager);
+    assert(db != nullptr);
+    auto condition = RedisDb::ExpireCondition::Always;
+    if (args.size() == 4) {
+        auto condition_opt = strToExpireCondition(args[3]);
+        if (condition_opt.has_value()) {
+            condition = condition_opt.value();
+        } else {
+            return commandError(ErrSyntaxError);
+        }
+    }
+    auto unix_ms = parseExpireDuration(args[2], 1);
+    if (unix_ms.has_value()) {
+        return respInteger(db->expireAt(args[1], now, ExpireTimePoint{unix_ms.value()}, condition) ? 1 : 0);
     }
     return commandError(ErrInvalidInteger);
 }

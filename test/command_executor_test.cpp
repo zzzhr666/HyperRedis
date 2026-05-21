@@ -385,6 +385,43 @@ TEST(CommandExecutorTest, ExpireAndPExpireReturnOneWhenTimeoutWasApplied) {
                   25);
 }
 
+TEST(CommandExecutorTest, PExpireAtUsesUnixMillisecondDeadline) {
+    CommandExecutor executor;
+    RedisManager manager;
+    RedisClientContext client;
+    auto* db = client.currentDb(manager);
+    ASSERT_NE(db, nullptr);
+
+    const auto now = makeTime(1'000);
+
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 3>{"PEXPIREAT", "missing", "2000"}, now),
+                  0);
+
+    db->set("future", RedisObject::createSharedStringObject("value"));
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 3>{"PEXPIREAT", "future", "2500"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "future"}, now),
+                  1'500);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "future"},
+                          makeTime(2'500)),
+                  -2);
+
+    db->set("past", RedisObject::createSharedStringObject("value"));
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 3>{"PEXPIREAT", "past", "999"}, now),
+                  1);
+    expectNullBulkString(execute(executor, manager, client, std::array<std::string_view, 2>{"GET", "past"}, now));
+
+    db->set("large", RedisObject::createSharedStringObject("value"));
+    expectInteger(execute(executor, manager, client,
+                          std::array<std::string_view, 3>{"PEXPIREAT", "large", "1700000000000"}, now),
+                  1);
+    expectInteger(execute(executor, manager, client, std::array<std::string_view, 2>{"PTTL", "large"}, now),
+                  1'699'999'999'000);
+}
+
 TEST(CommandExecutorTest, ExpireAcceptsNonPositiveTimeoutsAsImmediateExpiration) {
     CommandExecutor executor;
     RedisManager manager;
@@ -413,6 +450,8 @@ TEST(CommandExecutorTest, ExpireRejectsInvalidTimeouts) {
     expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"EXPIRE", "key", "not-int"}),
                 "ERR value is not an integer or out of range");
     expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"PEXPIRE", "key", "12.5"}),
+                "ERR value is not an integer or out of range");
+    expectError(execute(executor, manager, client, std::array<std::string_view, 3>{"PEXPIREAT", "key", "12.5"}),
                 "ERR value is not an integer or out of range");
 }
 

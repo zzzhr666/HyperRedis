@@ -63,6 +63,9 @@ namespace hyper {
         [[nodiscard]] RespValue pExpire_(RedisManager& manager, RedisClientContext& client, Args args,
                                          ExpireTimePoint now) const;
 
+        [[nodiscard]] RespValue pExpireAt_(RedisManager& manager, RedisClientContext& client, Args args,
+                                           ExpireTimePoint now) const;
+
         [[nodiscard]] RespValue flushAll_(RedisManager& manager) const;
 
         [[nodiscard]] RespValue flushDb_(RedisManager& manager, RedisClientContext& client) const;

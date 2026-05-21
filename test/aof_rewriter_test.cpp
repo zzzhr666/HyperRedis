@@ -53,6 +53,17 @@ namespace {
         ASSERT_NE(value, nullptr);
         EXPECT_EQ(value->asString(), expected);
     }
+
+    void expectSet(RedisDb& db, std::string_view key, const std::vector<std::string>& expected,
+                   ExpireTimePoint now) {
+        auto obj = db.get(key, now);
+        ASSERT_NE(obj, nullptr);
+        ASSERT_EQ(obj->getType(), ObjectType::Set);
+        EXPECT_EQ(obj->setSize(), expected.size());
+        for (const auto& member : expected) {
+            EXPECT_TRUE(obj->setContains(member)) << member;
+        }
+    }
 }
 
 TEST(AofRewriterTest, RewriteEmptyManagerCreatesEmptyAof) {
@@ -197,6 +208,126 @@ TEST(AofRewriterTest, RewriteHashKeysCanBeReplayed) {
     auto obj = target.db(0)->get("user", now);
     ASSERT_NE(obj, nullptr);
     EXPECT_EQ(obj->hashSize(), 2U);
+
+    std::filesystem::remove(path);
+}
+
+TEST(AofRewriterTest, RewriteSetKeysCanBeReplayed) {
+    const auto path = testPath("hyperredis-aof-rewriter-set.aof");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(1'000);
+    RedisManager source(1);
+    ASSERT_NE(source.db(0), nullptr);
+    auto set = RedisObject::createSharedSetObject();
+    EXPECT_TRUE(set->setAdd("alpha"));
+    EXPECT_TRUE(set->setAdd("42"));
+    EXPECT_TRUE(set->setAdd("beta"));
+    source.db(0)->set("tags", set);
+
+    AofRewriter rewriter(path);
+    ASSERT_TRUE(rewriter.rewrite(source, now));
+
+    RedisManager target(1);
+    AofReplayer replayer(path);
+    ASSERT_TRUE(replayer.replay(target, now));
+
+    ASSERT_NE(target.db(0), nullptr);
+    expectSet(*target.db(0), "tags", {"alpha", "42", "beta"}, now);
+
+    std::filesystem::remove(path);
+}
+
+TEST(AofRewriterTest, RewriteZSetKeysCanBeReplayed) {
+    const auto path = testPath("hyperredis-aof-rewriter-zset.aof");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(1'000);
+    RedisManager source(1);
+    ASSERT_NE(source.db(0), nullptr);
+    auto zset = RedisObject::createSharedZSetObject();
+    EXPECT_TRUE(zset->zSetAdd("alice", 10.5));
+    EXPECT_TRUE(zset->zSetAdd("bob", 7.0));
+    EXPECT_TRUE(zset->zSetAdd("carol", 10.5));
+    source.db(0)->set("leaders", zset);
+
+    AofRewriter rewriter(path);
+    ASSERT_TRUE(rewriter.rewrite(source, now));
+
+    RedisManager target(1);
+    AofReplayer replayer(path);
+    ASSERT_TRUE(replayer.replay(target, now));
+
+    ASSERT_NE(target.db(0), nullptr);
+    auto obj = target.db(0)->get("leaders", now);
+    ASSERT_NE(obj, nullptr);
+    ASSERT_EQ(obj->getType(), ObjectType::ZSet);
+    EXPECT_EQ(obj->zSetSize(), 3U);
+    ASSERT_TRUE(obj->zSetScore("alice").has_value());
+    ASSERT_TRUE(obj->zSetScore("bob").has_value());
+    ASSERT_TRUE(obj->zSetScore("carol").has_value());
+    EXPECT_DOUBLE_EQ(obj->zSetScore("alice").value(), 10.5);
+    EXPECT_DOUBLE_EQ(obj->zSetScore("bob").value(), 7.0);
+    EXPECT_DOUBLE_EQ(obj->zSetScore("carol").value(), 10.5);
+    EXPECT_EQ(obj->zSetRange(0, -1), (RedisObject::ZSetRangeResult{{"bob", 7.0}, {"alice", 10.5}, {"carol", 10.5}}));
+
+    std::filesystem::remove(path);
+}
+
+TEST(AofRewriterTest, RewritePreservesRemainingTtl) {
+    const auto path = testPath("hyperredis-aof-rewriter-ttl.aof");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(10'000);
+    const auto rewrite_now = now + Milliseconds{500};
+    RedisManager source(3);
+    ASSERT_NE(source.db(0), nullptr);
+    ASSERT_NE(source.db(2), nullptr);
+    source.db(0)->set("volatile", RedisObject::createSharedStringObject("db0-value"));
+    source.db(0)->set("persistent", RedisObject::createSharedStringObject("keep"));
+    source.db(2)->set("volatile", RedisObject::createSharedStringObject("db2-value"));
+    ASSERT_TRUE(source.db(0)->expireAfter("volatile", Milliseconds{2'500}, now));
+    ASSERT_TRUE(source.db(2)->expireAfter("volatile", Milliseconds{1'500}, now));
+
+    AofRewriter rewriter(path);
+    ASSERT_TRUE(rewriter.rewrite(source, rewrite_now));
+
+    RedisManager target(3);
+    AofReplayer replayer(path);
+    ASSERT_TRUE(replayer.replay(target, rewrite_now));
+
+    ASSERT_NE(target.db(0), nullptr);
+    ASSERT_NE(target.db(2), nullptr);
+    expectString(*target.db(0), "volatile", "db0-value", rewrite_now);
+    expectString(*target.db(0), "persistent", "keep", rewrite_now);
+    expectString(*target.db(2), "volatile", "db2-value", rewrite_now);
+    EXPECT_EQ(target.db(0)->pttl("volatile", rewrite_now), 2'000);
+    EXPECT_EQ(target.db(0)->pttl("persistent", rewrite_now), -1);
+    EXPECT_EQ(target.db(2)->pttl("volatile", rewrite_now), 1'000);
+
+    std::filesystem::remove(path);
+}
+
+TEST(AofRewriterTest, RewriteUsesAbsoluteExpireTimeWhenReplayIsDelayed) {
+    const auto path = testPath("hyperredis-aof-rewriter-absolute-ttl.aof");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(10'000);
+    const auto replay_now = now + Milliseconds{1'500};
+    RedisManager source(1);
+    ASSERT_NE(source.db(0), nullptr);
+    source.db(0)->set("soon", RedisObject::createSharedStringObject("value"));
+    ASSERT_TRUE(source.db(0)->expireAfter("soon", Milliseconds{1'000}, now));
+
+    AofRewriter rewriter(path);
+    ASSERT_TRUE(rewriter.rewrite(source, now));
+
+    RedisManager target(1);
+    AofReplayer replayer(path);
+    ASSERT_TRUE(replayer.replay(target, replay_now));
+
+    ASSERT_NE(target.db(0), nullptr);
+    EXPECT_EQ(target.db(0)->get("soon", replay_now), nullptr);
 
     std::filesystem::remove(path);
 }

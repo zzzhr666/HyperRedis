@@ -50,6 +50,7 @@ namespace hyper {
         Persist,
         Expire,
         PExpire,
+        PExpireAt,
         ZAdd,
         ZCard,
         ZRange,

@@ -181,6 +181,23 @@ TEST(DatabaseTest, PttlAndTtlMatchRedisExpirationSemantics) {
     EXPECT_EQ(db.size(), 0);
 }
 
+TEST(DatabaseTest, ExpireTimeReturnsAbsoluteUnixMillisecondsForLiveVolatileKeys) {
+    RedisDb db;
+    const auto now = makeTime(1'000);
+
+    EXPECT_FALSE(db.expireTime("missing", now).has_value());
+
+    db.set("plain", RedisObject::createSharedStringObject("value"));
+    EXPECT_FALSE(db.expireTime("plain", now).has_value());
+
+    db.set("volatile", RedisObject::createSharedStringObject("value"));
+    EXPECT_TRUE(db.expireAfter("volatile", Milliseconds{2'500}, now));
+    ASSERT_TRUE(db.expireTime("volatile", now).has_value());
+    EXPECT_EQ(db.expireTime("volatile", now).value(), 3'500);
+    EXPECT_EQ(db.expireTime("volatile", now + Milliseconds{1'000}).value(), 3'500);
+    EXPECT_FALSE(db.expireTime("volatile", now + Milliseconds{2'500}).has_value());
+}
+
 TEST(DatabaseTest, PersistClearsExpirationForLiveKeysOnly) {
     RedisDb db;
     const auto now = makeTime(1'000);

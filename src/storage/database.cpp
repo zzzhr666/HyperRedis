@@ -83,6 +83,17 @@ bool hyper::RedisDb::expireAfter(std::string_view key, Milliseconds ttl, ExpireT
     return expireAt(key, now, now + ttl, condition);
 }
 
+std::optional<hyper::UnixMilliseconds> hyper::RedisDb::expireTime(std::string_view key, ExpireTimePoint now) {
+    expireIfNeeded_(key,now);
+    if (!main_dict_.contains(key)) {
+        return std::nullopt;
+    }
+    if (const auto deadline = expire_dict_.get(key)) {
+        return *deadline;
+    }
+    return std::nullopt;
+}
+
 hyper::UnixMilliseconds hyper::RedisDb::pttl(std::string_view key, ExpireTimePoint now) {
     expireIfNeeded_(key, now);
     if (!main_dict_.contains(key)) {

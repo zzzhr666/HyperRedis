@@ -4,7 +4,7 @@
 
 这个仓库主要记录我在阅读《Redis 设计与实现》以及理解 Redis 源码过程中，对核心数据结构、对象系统、数据库和命令执行流程的手写实现与思考。目标不是做一个生产级 Redis 替代品，而是在保留 Redis 经典设计思想的前提下，用现代 C++ 重新表达原版 C 语言实现中的核心能力。
 
-当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、AOF-like 追加日志与重放、RESP 请求解析与响应序列化，以及命令执行协调层。完整 TCP 服务器和性能基准仍在后续计划中。
+当前项目重点是 `HyperRedisCore`：一个不依赖网络层的 Redis-like 静态核心库。它已经包含底层数据结构、Redis 对象模型、多 DB 存储管理、过期机制、RDB-like 快照持久化、AOF-like 追加日志与重放、AOF rewrite、RESP 请求解析与响应序列化，以及命令执行协调层。完整 TCP 服务器、后台持久化任务和性能基准仍在后续计划中。
 
 ## 项目目标
 
@@ -115,7 +115,8 @@ HyperRedis/
 │   │   ├── snapshot.hpp            # RDB-like 字节编解码
 │   │   ├── rdb_saver.hpp           # RDB-like 文件落盘包装
 │   │   ├── aof_appender.hpp        # AOF-like 命令追加
-│   │   └── aof_replayer.hpp        # AOF-like 命令重放
+│   │   ├── aof_replayer.hpp        # AOF-like 命令重放
+│   │   └── aof_rewriter.hpp        # 从当前 DB 状态生成紧凑 AOF 命令序列
 │   └── server/                     # 未来服务器层之前的命令核心
 │       ├── resp_value.hpp          # RESP 响应值模型
 │       ├── resp_codec.hpp          # RESP 命令解析与响应序列化
@@ -195,6 +196,7 @@ HyperRedis/
 | **RdbSaver**           | 文件落盘包装，基于临时文件和 rename 写入 RDB-like 快照                  |
 | **AofAppender**        | 将成功写命令以 RESP 命令帧追加到 AOF-like 文件，处理 DB 切换 `SELECT` |
 | **AofReplayer**        | 读取 AOF-like 文件并通过同一命令执行路径重放到临时 manager              |
+| **AofRewriter**        | 从当前 DB 状态生成紧凑 AOF 命令序列，使用 `PEXPIREAT` 保留绝对过期时间       |
 
 ---
 
@@ -380,6 +382,8 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 
 `CommandProcessor` 是在线写路径的协调层：它先通过 `CommandRegistry` 判断命令是否属于写命令，再调用 `CommandExecutor` 执行；只有命令执行成功且配置了 `AofAppender` 时，才把原始 argv 追加到 AOF 文件。`AofReplayer` 重放时不会直接修改 `RedisDb`，而是解析 AOF 中的 RESP 命令帧，并通过同一个 `CommandExecutor` 路径恢复数据。
 
+`AofRewriter` 则从当前数据库状态重新生成紧凑命令序列：String 使用 `SET`，List 使用 `RPUSH`，Hash 使用 `HSET`，Set 使用 `SADD`，ZSet 使用 `ZADD`。如果 key 带有过期时间，rewrite 会追加 `PEXPIREAT key unix_ms`，保存绝对过期时间而不是剩余 TTL，避免 rewrite 或 replay 延迟导致 key 被错误续命。
+
 ---
 
 ## 已实现功能
@@ -430,7 +434,7 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 
 | 分类 | 命令 |
 | --- | --- |
-| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX` |
+| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX` |
 | String | `SET`、`GET`、`MGET`、`MSET`、`STRLEN`、`APPEND`、`INCR`、`DECR`、`INCRBY`、`INCRBYFLOAT`、`GETRANGE`、`SETRANGE` |
 | List | `LPUSH`、`RPUSH`、`LPOP`、`RPOP`、`LLEN`、`LRANGE`、`LINDEX`、`LSET`、`LINSERT`、`LREM`、`LTRIM` |
 | Hash | `HSET`、`HGET`、`HDEL`、`HLEN`、`HGETALL`、`HEXISTS`、`HKEYS`、`HVALS` |
@@ -470,7 +474,9 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 - [x] AOF broken 状态：append 失败后拒绝后续写命令
 - [x] appendfsync 策略：`no` / `always`
 - [x] appendfsync 策略：`everysec`
-- [ ] AOF rewrite：从当前 DB 状态生成紧凑命令序列
+- [x] AOF rewrite：从当前 DB 状态生成紧凑命令序列
+- [x] AOF rewrite 覆盖 String / List / Hash / Set / ZSet
+- [x] AOF rewrite 使用 `PEXPIREAT` 保存绝对过期时间，避免 rewrite/replay 延迟导致 TTL 语义漂移
 
 ---
 
@@ -481,10 +487,10 @@ AOF 文件 -> parseRespCommand -> CommandExecutor replay
 - 底层数据结构：`linked_list`、`dict`、`skipList`、`intset`、`ziplist`
 - 对象模型：String、List、Hash、Set、ZSet 及编码转换
 - Redis 可见行为：范围、rank、随机成员、错误语义、边界值
-- 数据库层：过期、TTL/PTTL、rename、random key、active expire
+- 数据库层：过期、TTL/PTTL、绝对过期时间读取、rename、random key、active expire
 - 多 DB：`RedisManager` 与 `RedisClientContext`
 - RDB-like 持久化：`Snapshot` 字节 round-trip、`RdbSaver` 文件 round-trip 和坏文件保护
-- AOF-like 持久化：命令追加、DB 切换、重放恢复、坏文件保护、命令错误保护和 append 失败语义
+- AOF-like 持久化：命令追加、DB 切换、重放恢复、rewrite、绝对过期时间恢复、坏文件保护、命令错误保护和 append 失败语义
 - 命令层：命令分发、参数校验、wrong type、Redis 风格响应
 - RESP 编解码：响应序列化、命令数组解析、半包、错误帧、连续命令缓冲和二进制 bulk 参数
 
@@ -571,8 +577,9 @@ ctest --test-dir build --output-on-failure
 | 在线追加 | 成功写命令追加到 AOF buffer / 文件 | `CommandProcessor` 调用 `AofAppender` 追加 RESP 命令帧 |
 | 重放 | 解析 AOF 并走命令执行路径 | `AofReplayer` 使用 `parseRespCommand` + `CommandExecutor` |
 | DB 选择 | AOF 中写入 `SELECT` 恢复 DB 上下文 | `AofAppender` 在 DB 切换时写入 `SELECT` |
-| 失败保护 | 持久化错误会影响后续写入策略 | 当前返回 AOF 错误，后续计划加入 broken 状态 |
-| Rewrite / fsync | 支持 rewrite 和多种 fsync 策略 | 尚未实现，保留为后续学习切片 |
+| 失败保护 | 持久化错误会影响后续写入策略 | append 失败后进入 broken 状态，后续写命令会被拒绝 |
+| Rewrite | 从当前 DB 状态生成紧凑命令序列 | `AofRewriter` 覆盖五种对象类型，并用 `PEXPIREAT` 保存绝对过期时间 |
+| fsync | 支持多种 appendfsync 策略 | `AofAppender` 支持 `no` / `always` / `everysec` |
 
 ---
 
@@ -598,21 +605,36 @@ ctest --test-dir build --output-on-failure
 
 ## 后续计划
 
-近期重点：
+后续任务按《Redis 设计与实现》的学习节奏，从持久化核心过渡到事件系统、客户端和服务器生命周期。`BGSAVE` 与 `BGWRITEAOF` 暂不作为下一步直接实现目标，它们依赖后台任务状态、serverCron 检查、rewrite buffer 和原子替换流程，更适合在服务器骨架稳定后推进。
 
-- 实现 AOF rewrite，从当前 DB 状态生成紧凑命令序列
-- 将 RDB-like / AOF-like 持久化接入未来服务器启动/关闭流程
-- 设计同步 `SAVE` 和基于 fork/COW 的 `BGSAVE` 入口
-- 将 RESP codec 接入未来 TCP server 的输入/输出缓冲
-- 增加完整服务器目标和 TCP 连接管理
+### 近期任务流
 
-中长期方向：
+- [ ] 设计 `ServerCron` / time event 骨架：周期触发主动过期、AOF everysec fsync、未来后台任务检查
+- [ ] 增加最小 `RedisServer` 状态对象：持有 `RedisManager`、持久化配置、AOF/RDB 组件、dirty counter 和时间状态
+- [ ] 将 RDB-like / AOF-like 持久化接入服务器启动/关闭流程：启动时按配置加载 RDB/AOF，关闭时执行同步保存或关闭 AOF
+- [ ] 设计客户端输入/输出缓冲对象：query buffer、reply buffer、当前 DB、RESP command 解析结果
 
-- 接入事件驱动网络层，实现可运行 Redis-like server
-- 增加持久化校验和更完整的 RDB-like / AOF-like 格式支持
-- 补充 Redis 行为兼容测试
-- 增加 benchmark，量化内存结构和命令执行性能
-- 继续对照 Redis 源码补齐更多命令和边界语义
+### 服务器与事件系统
+
+- [ ] 实现文件事件抽象：readable/writable callback，先保留可测试接口，再决定 `poll` / `epoll` 实现
+- [ ] 接入 RESP codec 到客户端 query buffer，支持半包和连续命令
+- [ ] 增加最小 TCP server 目标：accept、read、execute、write RESP reply
+- [ ] 将 `CommandProcessor` 接入真实连接，让网络层只负责 buffer 和事件调度
+
+### 后台持久化任务
+
+- [ ] 设计后台任务状态模型：idle、running、success、failed，以及完成时间和错误信息
+- [ ] 实现同步 `SAVE` 命令入口，复用 `RdbSaver`
+- [ ] 在 serverCron 中预留后台任务完成检查接口
+- [ ] 实现 `BGSAVE`：后台生成临时 RDB，成功后原子替换，更新 last save 状态
+- [ ] 实现 `BGWRITEAOF`：后台 rewrite、主线程收集 rewrite 期间增量命令、完成后追加增量并原子替换
+
+### 中长期方向
+
+- [ ] 增加更完整的 Redis 行为兼容测试
+- [ ] 增加 benchmark，量化内存结构、命令执行和网络层性能
+- [ ] 继续对照 Redis 源码补齐更多命令和边界语义
+- [ ] 在单机服务器稳定后，再评估复制、Sentinel、Cluster 等分布式机制
 
 ## 致谢
 
