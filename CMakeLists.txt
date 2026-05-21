@@ -18,6 +18,7 @@ set(STORAGE_ENGINE_SOURCES
         src/storage/checksum_calculator.cpp
         src/storage/aof_appender.cpp
         src/storage/aof_replayer.cpp
+        src/storage/aof_rewriter.cpp
 )
 
 set(SERVER_CORE_SOURCES
@@ -81,6 +82,7 @@ set(HYPERREDIS_TESTS
         rdb_saver_test
         aof_appender_test
         aof_replayer_test
+        aof_rewriter_test
         client_context_test
         command_processor_test
         command_executor_test
