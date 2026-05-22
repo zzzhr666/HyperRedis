@@ -127,5 +127,5 @@ int hyper::EventLoop::runOnce(std::chrono::milliseconds timeout) {
             ++count;
         }
     }
-    return count;
+    return static_cast<int>(count);
 }

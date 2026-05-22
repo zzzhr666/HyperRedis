@@ -1,11 +1,11 @@
 #pragma once
 
-#include <chrono>
 #include <filesystem>
+
+#include "hyper/time.hpp"
 
 
 namespace hyper {
-    using ExpireTimePoint = std::chrono::system_clock::time_point;
     class RedisManager;
 
 

@@ -28,6 +28,8 @@ set(SERVER_CORE_SOURCES
         src/server/command_registry.cpp
         src/server/command_processor.cpp
         src/server/event_loop.cpp
+        src/server/client_session.cpp
+        src/server/client_socket_io.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -85,6 +87,8 @@ set(HYPERREDIS_TESTS
         aof_replayer_test
         aof_rewriter_test
         client_context_test
+        client_test
+        client_socket_io_test
         command_processor_test
         command_executor_test
         resp_codec_test

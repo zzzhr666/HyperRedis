@@ -11,7 +11,6 @@
 namespace hyper {
     [[nodiscard]] std::string serializeRespValue(const RespValue& value);
 
-
     enum class RespParseStatus : std::uint8_t {
         Complete,
         Incomplete,

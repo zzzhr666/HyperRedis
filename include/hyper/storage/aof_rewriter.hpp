@@ -1,11 +1,10 @@
 #pragma once
-#include <chrono>
 #include <filesystem>
+
+#include "hyper/time.hpp"
 
 namespace hyper {
     class RedisManager;
-
-    using ExpireTimePoint = std::chrono::system_clock::time_point;
 
     class AofRewriter {
     public:

@@ -1,11 +1,12 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <span>
 #include <string_view>
+
+#include "hyper/time.hpp"
 
 
 namespace hyper {
@@ -17,8 +18,6 @@ namespace hyper {
 
     class AofAppender {
     public:
-        using AofFsyncClock = std::chrono::system_clock;
-        using ExpireTimePoint = AofFsyncClock::time_point;
         explicit AofAppender(std::filesystem::path path, AofFsyncPolicy policy = AofFsyncPolicy::No);
 
         ~AofAppender();

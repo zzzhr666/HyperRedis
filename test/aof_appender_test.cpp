@@ -15,8 +15,8 @@
 using namespace hyper;
 
 namespace {
-    [[nodiscard]] AofAppender::ExpireTimePoint makeTime(std::int64_t ms) {
-        return AofAppender::ExpireTimePoint{std::chrono::milliseconds{ms}};
+    [[nodiscard]] ExpireTimePoint makeTime(std::int64_t ms) {
+        return ExpireTimePoint{Milliseconds{ms}};
     }
 
     [[nodiscard]] std::filesystem::path testPath(std::string_view name) {
