@@ -30,6 +30,7 @@ set(SERVER_CORE_SOURCES
         src/server/event_loop.cpp
         src/server/client_session.cpp
         src/server/client_socket_io.cpp
+        src/server/redis_server.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -93,6 +94,7 @@ set(HYPERREDIS_TESTS
         command_executor_test
         resp_codec_test
         event_loop_test
+        redis_server_test
 )
 
 foreach (test_target IN LISTS HYPERREDIS_TESTS)
