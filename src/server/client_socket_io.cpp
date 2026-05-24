@@ -32,8 +32,7 @@ namespace {
     }
 }
 
-hyper::ClientIoResult hyper::readClientQuery(ClientSession& client, RedisManager& manager,
-                                             const CommandProcessor& processor, ExpireTimePoint now) {
+hyper::ClientIoResult hyper::readClientQuery(ClientSession& client, RedisServer& server, ExpireTimePoint now) {
     std::array<char, ReadBufferSize> buffer{};
     auto n = readWithoutInterrupt(client.fd(), buffer.data(), ReadBufferSize);
     if (n == 0) {
@@ -45,10 +44,9 @@ hyper::ClientIoResult hyper::readClientQuery(ClientSession& client, RedisManager
     if (n > 0) {
         std::string_view input{buffer.data(), static_cast<std::size_t>(n)};
         client.appendQueryBytes(input);
-        client.processInput(manager, processor, now);
+        client.processInput(server, now);
         return {ClientIoStatus::Ok, static_cast<std::size_t>(n)};
     }
-
     return {ClientIoStatus::Error, 0};
 }
 

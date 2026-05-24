@@ -5,9 +5,8 @@
 #include "hyper/time.hpp"
 
 namespace hyper {
-    class CommandProcessor;
     class ClientSession;
-    class RedisManager;
+    class RedisServer;
 
     enum class ClientIoStatus {
         Ok,
@@ -22,8 +21,7 @@ namespace hyper {
     };
 
     [[nodiscard]] ClientIoResult readClientQuery(ClientSession& client,
-                                                 RedisManager& manager,
-                                                 const CommandProcessor& processor,
+                                                 RedisServer& server,
                                                  ExpireTimePoint now);
 
     [[nodiscard]] ClientIoResult writeClientReply(ClientSession& client);

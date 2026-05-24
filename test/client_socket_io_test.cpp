@@ -9,9 +9,8 @@
 
 #include "hyper/server/client_session.hpp"
 #include "hyper/server/client_socket_io.hpp"
-#include "hyper/server/command_processor.hpp"
+#include "hyper/server/redis_server.hpp"
 #include "hyper/server/resp_codec.hpp"
-#include "hyper/storage/redis_manager.hpp"
 #include "hyper/time.hpp"
 
 using namespace hyper;
@@ -77,13 +76,12 @@ namespace {
 TEST(ClientSocketIoTest, ReadClientQueryAppendsBytesProcessesCommandAndQueuesReply) {
     SocketPair sockets;
     ClientSession client(sockets.serverFd());
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     const auto ping = commandBytes(std::array<std::string_view, 1>{"PING"});
 
     ASSERT_EQ(write(sockets.peerFd(), ping.data(), ping.size()), static_cast<ssize_t>(ping.size()));
 
-    const auto result = readClientQuery(client, manager, processor, makeTime(1'000));
+    const auto result = readClientQuery(client, server, makeTime(1'000));
 
     EXPECT_EQ(result.status, ClientIoStatus::Ok);
     EXPECT_EQ(result.bytes, ping.size());
@@ -94,12 +92,11 @@ TEST(ClientSocketIoTest, ReadClientQueryAppendsBytesProcessesCommandAndQueuesRep
 TEST(ClientSocketIoTest, WriteClientReplyWritesBytesAndConsumesReplyBuffer) {
     SocketPair sockets;
     ClientSession client(sockets.serverFd());
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     const auto ping = commandBytes(std::array<std::string_view, 1>{"PING"});
 
     client.appendQueryBytes(ping);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     const auto result = writeClientReply(client);
 
@@ -116,12 +113,11 @@ TEST(ClientSocketIoTest, WriteClientReplyWritesBytesAndConsumesReplyBuffer) {
 TEST(ClientSocketIoTest, ReadClientQueryReturnsClosedWhenPeerCloses) {
     SocketPair sockets;
     ClientSession client(sockets.serverFd());
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
 
     sockets.closePeer();
 
-    const auto result = readClientQuery(client, manager, processor, makeTime(1'000));
+    const auto result = readClientQuery(client, server, makeTime(1'000));
 
     EXPECT_EQ(result.status, ClientIoStatus::Closed);
     EXPECT_EQ(result.bytes, 0U);
@@ -132,11 +128,10 @@ TEST(ClientSocketIoTest, ReadClientQueryReturnsClosedWhenPeerCloses) {
 TEST(ClientSocketIoTest, ReadClientQueryReturnsWouldBlockForNonBlockingSocketWithoutData) {
     SocketPair sockets;
     ClientSession client(sockets.serverFd());
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     sockets.setServerNonBlocking();
 
-    const auto result = readClientQuery(client, manager, processor, makeTime(1'000));
+    const auto result = readClientQuery(client, server, makeTime(1'000));
 
     EXPECT_EQ(result.status, ClientIoStatus::WouldBlock);
     EXPECT_EQ(result.bytes, 0U);

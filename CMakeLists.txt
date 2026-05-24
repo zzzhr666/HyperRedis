@@ -31,6 +31,8 @@ set(SERVER_CORE_SOURCES
         src/server/client_session.cpp
         src/server/client_socket_io.cpp
         src/server/redis_server.cpp
+        src/server/tcp_listener.cpp
+        src/server/redis_server_runner.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -51,6 +53,22 @@ target_link_libraries(HyperRedisCore
         PUBLIC
         spdlog::spdlog
 )
+
+add_executable(hyper_redis_server
+        apps/hyperredis_server.cpp
+)
+
+target_include_directories(hyper_redis_server
+        PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(hyper_redis_server
+        PRIVATE
+        HyperRedisCore
+)
+
+
 
 enable_testing()
 include(GoogleTest)
@@ -94,6 +112,8 @@ set(HYPERREDIS_TESTS
         command_executor_test
         resp_codec_test
         event_loop_test
+        tcp_listener_test
+        redis_server_runner_test
         redis_server_test
 )
 

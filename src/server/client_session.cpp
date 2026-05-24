@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-#include "hyper/server/command_processor.hpp"
+#include "hyper/server/redis_server.hpp"
 #include "hyper/server/resp_codec.hpp"
 #include "hyper/server/resp_value.hpp"
 
@@ -24,7 +24,7 @@ void hyper::ClientSession::consumeReplyBytes(std::size_t count) {
     reply_buffer_.erase(0, std::min(count, reply_buffer_.size()));
 }
 
-void hyper::ClientSession::processInput(RedisManager& manager, const CommandProcessor& processor, ExpireTimePoint now) {
+void hyper::ClientSession::processInput(RedisServer& server, ExpireTimePoint now) {
     while (!query_buffer_.empty() && !close_after_reply_) {
         auto [status,command,consumed] = parseRespCommand(query_buffer_);
         if (status == RespParseStatus::Incomplete) {
@@ -36,7 +36,7 @@ void hyper::ClientSession::processInput(RedisManager& manager, const CommandProc
             break;
         }
         std::vector<std::string_view> input{command.args.begin(), command.args.end()};
-        auto reply = processor.execute(manager, context_, input, now);
+        auto reply = server.execute(context_, input, now);
         reply_buffer_.append(serializeRespValue(reply));
         query_buffer_.erase(0, consumed);
     }

@@ -5,9 +5,8 @@
 #include <string_view>
 
 #include "hyper/server/client_session.hpp"
-#include "hyper/server/command_processor.hpp"
+#include "hyper/server/redis_server.hpp"
 #include "hyper/server/resp_codec.hpp"
-#include "hyper/storage/redis_manager.hpp"
 #include "hyper/time.hpp"
 
 using namespace hyper;
@@ -39,13 +38,12 @@ TEST(ClientTest, StartsWithConnectionStateAndEmptyBuffers) {
 }
 
 TEST(ClientTest, IncompleteCommandStaysInQueryBufferWithoutReply) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
     const std::string partial = "*1\r\n$4\r\nPI";
 
     client.appendQueryBytes(partial);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_EQ(client.queryBuffer(), partial);
     EXPECT_TRUE(client.replyBuffer().empty());
@@ -53,14 +51,13 @@ TEST(ClientTest, IncompleteCommandStaysInQueryBufferWithoutReply) {
 }
 
 TEST(ClientTest, CompletingPartialCommandProducesReplyAndConsumesQueryBuffer) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
 
     client.appendQueryBytes("*1\r\n$4\r\nPI");
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
     client.appendQueryBytes("NG\r\n");
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_TRUE(client.queryBuffer().empty());
     EXPECT_EQ(client.replyBuffer(), literalBytes("+PONG\r\n"));
@@ -68,68 +65,64 @@ TEST(ClientTest, CompletingPartialCommandProducesReplyAndConsumesQueryBuffer) {
 }
 
 TEST(ClientTest, ProcessesMultipleCompleteCommandsFromOneQueryBuffer) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
     const auto first = commandBytes(std::array<std::string_view, 1>{"PING"});
     const auto second = commandBytes(std::array<std::string_view, 2>{"PING", "hello"});
 
     client.appendQueryBytes(first + second);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_TRUE(client.queryBuffer().empty());
     EXPECT_EQ(client.replyBuffer(), literalBytes("+PONG\r\n$5\r\nhello\r\n"));
 }
 
 TEST(ClientTest, CommandExecutionUsesClientContextAcrossCommands) {
-    RedisManager manager(2);
-    CommandProcessor processor;
+    RedisServer server(2);
     ClientSession client(42);
     const auto select = commandBytes(std::array<std::string_view, 2>{"SELECT", "1"});
     const auto set = commandBytes(std::array<std::string_view, 3>{"SET", "key", "db1"});
     const auto get = commandBytes(std::array<std::string_view, 2>{"GET", "key"});
 
     client.appendQueryBytes(select + set + get);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_EQ(client.context().dbIndex(), 1);
     EXPECT_TRUE(client.queryBuffer().empty());
     EXPECT_EQ(client.replyBuffer(), literalBytes("+OK\r\n+OK\r\n$3\r\ndb1\r\n"));
+    EXPECT_EQ(server.dirtyCount(), 1);
 }
 
 TEST(ClientTest, ProtocolErrorAddsErrorReplyAndMarksClientForClose) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
 
     client.appendQueryBytes("+OK\r\n");
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_EQ(client.replyBuffer(), literalBytes("-ERR protocol error\r\n"));
     EXPECT_TRUE(client.closeAfterReply());
 }
 
 TEST(ClientTest, TakeReplyBytesReturnsAndClearsReplyBuffer) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
     const auto ping = commandBytes(std::array<std::string_view, 1>{"PING"});
 
     client.appendQueryBytes(ping);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_EQ(client.takeReplyBytes(), std::string(literalBytes("+PONG\r\n")));
     EXPECT_TRUE(client.replyBuffer().empty());
 }
 
 TEST(ClientTest, ConsumeReplyBytesKeepsUnwrittenSuffix) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
     const auto ping = commandBytes(std::array<std::string_view, 2>{"PING", "hello"});
 
     client.appendQueryBytes(ping);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     client.consumeReplyBytes(4);
 
@@ -137,13 +130,12 @@ TEST(ClientTest, ConsumeReplyBytesKeepsUnwrittenSuffix) {
 }
 
 TEST(ClientTest, ConsumeReplyBytesCanClearWholeReplyBuffer) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
     const auto ping = commandBytes(std::array<std::string_view, 1>{"PING"});
 
     client.appendQueryBytes(ping);
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     client.consumeReplyBytes(100);
 
@@ -151,14 +143,13 @@ TEST(ClientTest, ConsumeReplyBytesCanClearWholeReplyBuffer) {
 }
 
 TEST(ClientTest, ReplyBufferPreservesBinaryBulkStringBytes) {
-    RedisManager manager(1);
-    CommandProcessor processor;
+    RedisServer server(1);
     ClientSession client(42);
     const std::string binary_arg{"a\0b", 3};
     const std::array<std::string_view, 2> ping{"PING", std::string_view{binary_arg.data(), binary_arg.size()}};
 
     client.appendQueryBytes(commandBytes(ping));
-    client.processInput(manager, processor, makeTime(1'000));
+    client.processInput(server, makeTime(1'000));
 
     EXPECT_EQ(client.replyBuffer(), literalBytes("$3\r\na\0b\r\n"));
 }

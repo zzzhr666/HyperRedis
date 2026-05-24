@@ -8,7 +8,7 @@
 
 
 namespace hyper {
-    class CommandProcessor;
+    class RedisServer;
 
     class ClientSession {
     public:
@@ -44,7 +44,7 @@ namespace hyper {
 
         void consumeReplyBytes(std::size_t count);
 
-        void processInput(RedisManager& manager, const CommandProcessor& processor, ExpireTimePoint now);
+        void processInput(RedisServer& server, ExpireTimePoint now);
 
     private:
         int fd_;
