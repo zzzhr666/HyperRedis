@@ -1,13 +1,41 @@
 #pragma once
+
+#include <chrono>
+#include <cstddef>
+#include <filesystem>
+#include <memory>
+#include <optional>
+
 #include "event_loop.hpp"
-#include "redis_server.hpp"
 #include "tcp_listener.hpp"
+#include "hyper/storage/aof_appender.hpp"
+#include "hyper/storage/redis_manager.hpp"
 
 namespace hyper {
+    class RedisServer;
+
+    struct RedisServerPersistenceConfig {
+        std::optional<std::filesystem::path> aof_path;
+        AofFsyncPolicy append_fsync_policy{AofFsyncPolicy::No};
+
+        std::optional<std::filesystem::path> rdb_path;
+        bool load_rdb_on_start{false};
+        bool save_rdb_on_stop{false};
+        bool load_aof_on_start{false};
+    };
+
+    struct RedisServerRunnerConfig {
+        TcpListenOptions listen_options;
+        std::size_t db_count{RedisManager::DefaultDbCount};
+        RedisServerPersistenceConfig persistence;
+    };
+
     class RedisServerRunner {
     public:
-        RedisServerRunner() : running_(false) {}
-        bool start(const TcpListenOptions& option);
+        RedisServerRunner();
+        ~RedisServerRunner();
+
+        bool start(const RedisServerRunnerConfig& config);
         void runOnce(std::chrono::milliseconds timeout);
 
         void stop();
@@ -19,9 +47,10 @@ namespace hyper {
         }
 
     private:
-        RedisServer server_;
+        std::unique_ptr<RedisServer> server_;
         EventLoop loop_;
         std::optional<TcpListener> listener_;
         bool running_;
+        bool save_rdb_on_stop_;
     };
 }

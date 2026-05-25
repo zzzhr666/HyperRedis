@@ -94,8 +94,7 @@ TEST(AofRewriterTest, RewriteStringKeysCanBeReplayed) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     expectString(*target.db(0), "plain", "value", now);
@@ -119,8 +118,7 @@ TEST(AofRewriterTest, RewritePreservesSelectedDatabases) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(3);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     ASSERT_NE(target.db(1), nullptr);
@@ -147,8 +145,7 @@ TEST(AofRewriterTest, RewriteSkipsExpiredKeys) {
     ASSERT_TRUE(rewriter.rewrite(source, now + Milliseconds{5}));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now + Milliseconds{5}));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now + Milliseconds{5}).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     EXPECT_EQ(target.db(0)->get("expired", now + Milliseconds{5}), nullptr);
@@ -174,8 +171,7 @@ TEST(AofRewriterTest, RewriteListKeysCanBeReplayedInOrder) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     expectList(*target.db(0), "items", {"first", "second", "third"}, now);
@@ -199,8 +195,7 @@ TEST(AofRewriterTest, RewriteHashKeysCanBeReplayed) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     expectHashField(*target.db(0), "user", "name", "alice", now);
@@ -229,8 +224,7 @@ TEST(AofRewriterTest, RewriteSetKeysCanBeReplayed) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     expectSet(*target.db(0), "tags", {"alpha", "42", "beta"}, now);
@@ -255,8 +249,7 @@ TEST(AofRewriterTest, RewriteZSetKeysCanBeReplayed) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     auto obj = target.db(0)->get("leaders", now);
@@ -293,8 +286,7 @@ TEST(AofRewriterTest, RewritePreservesRemainingTtl) {
     ASSERT_TRUE(rewriter.rewrite(source, rewrite_now));
 
     RedisManager target(3);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, rewrite_now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, rewrite_now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     ASSERT_NE(target.db(2), nullptr);
@@ -323,8 +315,7 @@ TEST(AofRewriterTest, RewriteUsesAbsoluteExpireTimeWhenReplayIsDelayed) {
     ASSERT_TRUE(rewriter.rewrite(source, now));
 
     RedisManager target(1);
-    AofReplayer replayer(path);
-    ASSERT_TRUE(replayer.replay(target, replay_now));
+    ASSERT_TRUE(AofReplayer::replay(path, target, replay_now).ok);
 
     ASSERT_NE(target.db(0), nullptr);
     EXPECT_EQ(target.db(0)->get("soon", replay_now), nullptr);

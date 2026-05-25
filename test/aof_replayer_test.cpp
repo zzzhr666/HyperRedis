@@ -47,9 +47,10 @@ TEST(AofReplayerTest, ReplayRestoresStringCommand) {
     ASSERT_TRUE(appender.appendCommand(0, args, makeTime(1'000)));
 
     RedisManager manager(1);
-    AofReplayer replayer(path);
 
-    ASSERT_TRUE(replayer.replay(manager, makeTime(1'000)));
+    const auto result = AofReplayer::replay(path, manager, makeTime(1'000));
+    ASSERT_TRUE(result.ok);
+    EXPECT_EQ(result.selected_db_index, 0U);
 
     ASSERT_NE(manager.db(0), nullptr);
     expectString(*manager.db(0), "key", "value", makeTime(1'000));
@@ -66,9 +67,10 @@ TEST(AofReplayerTest, ReplayRestoresSelectedDatabases) {
     ASSERT_TRUE(appender.appendCommand(1, args, makeTime(1'000)));
 
     RedisManager manager(2);
-    AofReplayer replayer(path);
 
-    ASSERT_TRUE(replayer.replay(manager, makeTime(1'000)));
+    const auto result = AofReplayer::replay(path, manager, makeTime(1'000));
+    ASSERT_TRUE(result.ok);
+    EXPECT_EQ(result.selected_db_index, 1U);
 
     ASSERT_NE(manager.db(0), nullptr);
     ASSERT_NE(manager.db(1), nullptr);
@@ -87,9 +89,8 @@ TEST(AofReplayerTest, ReplayBadFileReturnsFalseAndKeepsManager) {
     ASSERT_NE(manager.db(0), nullptr);
     manager.db(0)->set("keep", RedisObject::createSharedStringObject("old"));
 
-    AofReplayer replayer(path);
-
-    EXPECT_FALSE(replayer.replay(manager, makeTime(1'000)));
+    const auto result = AofReplayer::replay(path, manager, makeTime(1'000));
+    EXPECT_FALSE(result.ok);
     expectString(*manager.db(0), "keep", "old", makeTime(1'000));
 
     std::filesystem::remove(path);
@@ -107,9 +108,8 @@ TEST(AofReplayerTest, ReplayCommandErrorReturnsFalseAndKeepsManager) {
     ASSERT_NE(manager.db(0), nullptr);
     manager.db(0)->set("keep", RedisObject::createSharedStringObject("old"));
 
-    AofReplayer replayer(path);
-
-    EXPECT_FALSE(replayer.replay(manager, makeTime(1'000)));
+    const auto result = AofReplayer::replay(path, manager, makeTime(1'000));
+    EXPECT_FALSE(result.ok);
     expectString(*manager.db(0), "keep", "old", makeTime(1'000));
     EXPECT_EQ(manager.db(0)->get("key", makeTime(1'000)), nullptr);
 

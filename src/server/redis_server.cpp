@@ -12,6 +12,7 @@
 #include "hyper/storage/aof_appender.hpp"
 #include "hyper/storage/rdb_saver.hpp"
 #include "hyper/time.hpp"
+#include "hyper/storage/aof_replayer.hpp"
 
 
 namespace {
@@ -160,6 +161,32 @@ bool hyper::RedisServer::attachListener(EventLoop& loop, int listen_fd) {
 
 void hyper::RedisServer::detachListener(EventLoop& loop, int listen_fd) {
     loop.removeFileEvent(listen_fd, FileEventMask::Readable);
+}
+
+bool hyper::RedisServer::loadRdb(ExpireTimePoint now) {
+    if (hasRdbSaver()) {
+        return rdb_saver_->load(manager_, now);
+    }
+    return false;
+}
+
+bool hyper::RedisServer::saveRdb(ExpireTimePoint now) {
+    if (hasRdbSaver()) {
+        return rdb_saver_->save(manager_, now);
+    }
+    return false;
+}
+
+bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
+    if (hasAofAppender()) {
+        auto [replay_success,current_db_index] = AofReplayer::replay(aof_appender_->path(), manager_, now);
+        if (!replay_success) {
+            return false;
+        }
+        aof_appender_->setSelectedDbIndex(current_db_index);
+        return true;
+    }
+    return false;
 }
 
 void hyper::RedisServer::enableClientWritable_(EventLoop& loop, int fd) {

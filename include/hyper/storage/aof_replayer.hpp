@@ -8,15 +8,13 @@
 namespace hyper {
     class RedisManager;
 
-
+    struct AofReplayResult {
+        bool ok{false};
+        std::size_t selected_db_index{0};
+    };
     class AofReplayer {
     public:
-        explicit AofReplayer(std::filesystem::path path);
+        static AofReplayResult replay(const std::filesystem::path& path, RedisManager& manager, ExpireTimePoint now);
 
-
-        bool replay(RedisManager& manager, ExpireTimePoint now);
-
-    private:
-        std::filesystem::path path_;
     };
 }

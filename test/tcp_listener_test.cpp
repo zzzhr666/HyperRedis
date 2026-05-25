@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstdint>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <string_view>
 #include <sys/socket.h>
 #include <type_traits>
 #include <unistd.h>
@@ -58,31 +60,9 @@ namespace {
         int error_{0};
     };
 
-    [[nodiscard]] bool tcpListeningUnavailableByPermission() noexcept {
-        int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) {
-            return errno == EPERM || errno == EACCES;
-        }
-
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port = 0;
-
-        if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-            const int bind_errno = errno;
-            ::close(fd);
-            return bind_errno == EPERM || bind_errno == EACCES;
-        }
-
-        if (::listen(fd, 1) != 0) {
-            const int listen_errno = errno;
-            ::close(fd);
-            return listen_errno == EPERM || listen_errno == EACCES;
-        }
-
-        ::close(fd);
-        return false;
+    [[nodiscard]] bool skipTcpListenerTests() noexcept {
+        const char* value = std::getenv("HYPERREDIS_SKIP_TCP_LISTENER_TESTS");
+        return value != nullptr && std::string_view{value} == "1";
     }
 
     [[nodiscard]] TcpListenOptions portZeroOptions() {
@@ -100,8 +80,8 @@ TEST(TcpListenerTest, IsMoveOnly) {
 }
 
 TEST(TcpListenerTest, CreateWithPortZeroBindsToAssignedPort) {
-    if (tcpListeningUnavailableByPermission()) {
-        GTEST_SKIP() << "TCP listening sockets are not permitted in this environment";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
 
     auto listener = TcpListener::create(portZeroOptions());
@@ -113,8 +93,8 @@ TEST(TcpListenerTest, CreateWithPortZeroBindsToAssignedPort) {
 }
 
 TEST(TcpListenerTest, CreatedListenerAcceptsTcpClient) {
-    if (tcpListeningUnavailableByPermission()) {
-        GTEST_SKIP() << "TCP listening sockets are not permitted in this environment";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
     auto listener = TcpListener::create(portZeroOptions());
     ASSERT_TRUE(listener.has_value());
@@ -128,8 +108,8 @@ TEST(TcpListenerTest, CreatedListenerAcceptsTcpClient) {
 }
 
 TEST(TcpListenerTest, MoveConstructorTransfersFdOwnership) {
-    if (tcpListeningUnavailableByPermission()) {
-        GTEST_SKIP() << "TCP listening sockets are not permitted in this environment";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
     auto listener = TcpListener::create(portZeroOptions());
     ASSERT_TRUE(listener.has_value());
@@ -146,8 +126,8 @@ TEST(TcpListenerTest, MoveConstructorTransfersFdOwnership) {
 }
 
 TEST(TcpListenerTest, MoveAssignmentClosesPreviousFdAndTransfersOwnership) {
-    if (tcpListeningUnavailableByPermission()) {
-        GTEST_SKIP() << "TCP listening sockets are not permitted in this environment";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
     auto first = TcpListener::create(portZeroOptions());
     auto second = TcpListener::create(portZeroOptions());

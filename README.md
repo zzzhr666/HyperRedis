@@ -7,7 +7,7 @@ HyperRedis 是一个用于学习和实践 Redis 内部设计的现代 C++ 项目
 当前项目已经从纯核心库推进到一个可以被 `redis-cli` 连接的青春版 Redis-like server：
 
 - `HyperRedisCore`：静态核心库，包含数据结构、对象系统、数据库、命令执行、RESP、AOF/RDB-like 持久化、事件循环、客户端会话和 TCP server 组件。
-- `hyper_redis_server`：可执行服务端入口，支持 `--host` 和 `--port` 参数，可以通过 `redis-cli` 发送命令。
+- `hyper_redis_server`：可执行服务端入口，支持监听参数、AOF/RDB-like 持久化参数和 Ctrl-C 优雅停止，可以通过 `redis-cli` 发送命令。
 
 ---
 
@@ -79,6 +79,40 @@ cmake --build build --target hyper_redis_server
 ```
 
 如果传 `--port 0`，系统会自动分配端口，启动日志会打印真实监听端口。
+
+服务端当前支持这些启动参数：
+
+```text
+--host HOST
+--port PORT
+--aof PATH
+--appendfsync no|always|everysec
+--rdb PATH
+--load-rdb
+--load-aof
+--save-rdb-on-stop
+```
+
+启用 AOF 追加：
+
+```bash
+./build/hyper_redis_server --port 8080 --aof /tmp/hyperredis.aof
+```
+
+从 AOF 启动恢复：
+
+```bash
+./build/hyper_redis_server --port 8080 --aof /tmp/hyperredis.aof --load-aof
+```
+
+启用 RDB-like 退出保存，并在下次启动加载：
+
+```bash
+./build/hyper_redis_server --port 8080 --rdb /tmp/hyperredis.rdb --save-rdb-on-stop
+./build/hyper_redis_server --port 8080 --rdb /tmp/hyperredis.rdb --load-rdb
+```
+
+如果同时启用 `--load-aof` 和 `--load-rdb`，当前规则是 AOF 优先。
 
 ### 4. 使用 redis-cli 交互
 
@@ -311,10 +345,13 @@ dict / intset / ziplist / skipList / linked_list
 - [x] checksum 校验
 - [x] AOF-like 命令追加
 - [x] AOF replay 使用同一命令执行路径恢复数据
+- [x] AOF replay 返回文件尾部 DB 上下文，并同步给后续 AOF append
 - [x] AOF append 失败后进入 broken 状态并拒绝后续写命令
 - [x] appendfsync `no` / `always` / `everysec`
 - [x] AOF rewrite 从当前 DB 生成紧凑命令序列
 - [x] AOF rewrite 使用 `PEXPIREAT` 保存绝对过期时间
+- [x] 服务端启动时按配置加载 RDB/AOF，且 `--load-aof` 优先于 `--load-rdb`
+- [x] 服务端关闭时可按配置保存 RDB-like 快照
 
 ---
 
@@ -345,13 +382,13 @@ dict / intset / ziplist / skipList / linked_list
 - 数据库：过期、TTL/PTTL、绝对过期时间读取、rename、random key、active expire
 - 多 DB：`RedisManager` 与 `RedisClientContext`
 - RDB-like：快照 round-trip、文件 round-trip、坏文件保护、checksum
-- AOF-like：append、DB 切换、replay、rewrite、fsync 策略、坏文件保护、append 失败语义
+- AOF-like：append、DB 切换、replay、rewrite、fsync 策略、坏文件保护、append 失败语义、replay 后 append DB 上下文同步
 - 命令层：分发、参数校验、wrong type、Redis 风格响应、dirty count
 - RESP：响应序列化、命令数组解析、半包、错误帧、连续命令缓冲、二进制 bulk
 - 客户端会话：query/reply buffer、半包、连续命令、协议错误、二进制 bulk reply
 - socket I/O：read/write、`WouldBlock`、peer close、部分写入消费
 - 事件循环：readable/writable 触发、事件删除、同 fd 部分 mask 删除、callback 内删除事件
-- TCP/server：listener nonblocking、accept、client read/write、runner 生命周期、真实 TCP PING
+- TCP/server：listener nonblocking、accept、client read/write、runner 生命周期、真实 TCP PING、RDB/AOF 启动恢复和退出保存
 - 时间回归：同一连接中 `PEXPIRE` 后按真实当前时间过期，而不是使用注册回调时冻结的时间
 
 运行全部测试：
@@ -390,6 +427,7 @@ HYPERREDIS_RUN_TCP_LISTENER_TESTS=1 ./build/redis_server_test --gtest_filter='Re
 | TCP listener + accept                  | `TcpListener` + `RedisServer::attachListener`                   |
 | server lifecycle                       | `RedisServerRunner` 组合 listener/server/event loop               |
 | AOF append/replay/rewrite              | `AofAppender` / `AofReplayer` / `AofRewriter`                   |
+| RDB/AOF server startup recovery        | `RedisServerRunnerConfig::persistence` + `RedisServer::loadRdb/loadAof` |
 
 ---
 
@@ -400,9 +438,8 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - 暂未实现 `COMMAND`、`INFO`、`CONFIG` 等 redis-cli 辅助命令。
 - 暂未实现 AUTH、ACL、复制、Sentinel、Cluster。
 - 服务端目前是单线程事件循环，没有后台任务线程。
-- AOF/RDB-like 组件已经实现，但还没有完整接入服务端启动加载和关闭保存流程。
 - 暂未实现 serverCron/time event 骨架，主动过期、AOF everysec fsync 等周期任务还没有统一调度。
-- 暂未实现优雅退出信号处理。
+- Ctrl-C/SIGTERM 已能触发 runner 停止和按配置保存 RDB，但还没有更完整的 server shutdown 状态机。
 - 启动失败时错误信息仍较粗，需要进一步携带 bind/listen errno。
 - 尚未做系统性 benchmark。
 
@@ -422,16 +459,18 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - [x] `hyper_redis_server` 可执行入口
 - [x] `redis-cli` 手动交互验证
 - [x] 修正网络命令执行时间：事件触发时取当前时间
-- [ ] `--help` 区分正常退出和参数错误
+- [x] 抽出 server 参数解析组件，支持监听和持久化参数
+- [x] Ctrl-C/SIGTERM 触发 `RedisServerRunner::stop()`
+- [x] `--help` 区分正常退出和参数错误
 - [ ] 启动失败返回更具体 errno 信息
-- [ ] 支持 Ctrl-C 优雅停止 server
 - [ ] 设计 serverCron/time event，周期执行主动过期和 AOF everysec fsync
 
 ### 持久化接入
 
-- [ ] 服务端启动时按配置加载 RDB/AOF
-- [ ] 服务端关闭时执行同步保存或关闭 AOF
-- [ ] 将 AOF append 接入真实 TCP 写命令路径
+- [x] 服务端启动时按配置加载 RDB/AOF
+- [x] 服务端关闭时按配置同步保存 RDB-like 快照
+- [x] 将 AOF append 接入真实 TCP 写命令路径
+- [x] AOF 启动恢复后同步后续 append 的 DB 选择状态
 - [ ] 在 serverCron 中调度 AOF everysec fsync
 - [ ] 增加同步 `SAVE` 命令入口
 - [ ] 设计 `BGSAVE` / `BGWRITEAOF` 的后台任务状态模型

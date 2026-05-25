@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -58,6 +59,19 @@ namespace hyper {
 
         [[nodiscard]] bool attachListener(EventLoop& loop, int listen_fd);
         void detachListener(EventLoop& loop, int listen_fd);
+
+        //RDB
+        [[nodiscard]] bool hasRdbSaver() const noexcept {
+            return rdb_saver_ != nullptr;
+        }
+        [[nodiscard]] bool loadRdb(ExpireTimePoint now);
+        [[nodiscard]] bool saveRdb(ExpireTimePoint now);
+
+        //AOF
+        [[nodiscard]] bool hasAofAppender() const noexcept {
+            return aof_appender_ != nullptr;
+        }
+        [[nodiscard]] bool loadAof(ExpireTimePoint now);
 
     private:
         void enableClientWritable_(EventLoop& loop, int fd);

@@ -38,6 +38,10 @@ namespace hyper {
                                          std::span<const std::string_view> args,
                                          ExpireTimePoint now);
 
+        void setSelectedDbIndex(std::size_t db_index) noexcept {
+            selected_db_index_ = db_index;
+        }
+
     private:
         [[nodiscard]] bool syncIfDue_(ExpireTimePoint now);
 

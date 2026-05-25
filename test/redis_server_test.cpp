@@ -6,7 +6,10 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fcntl.h>
+#include <fstream>
+#include <memory>
 #include <netinet/in.h>
 #include <string>
 #include <string_view>
@@ -21,6 +24,10 @@
 #include "hyper/server/resp_codec.hpp"
 #include "hyper/server/resp_value.hpp"
 #include "hyper/server/tcp_listener.hpp"
+#include "hyper/storage/aof_appender.hpp"
+#include "hyper/storage/database.hpp"
+#include "hyper/storage/object.hpp"
+#include "hyper/storage/rdb_saver.hpp"
 #include "hyper/time.hpp"
 
 using namespace hyper;
@@ -108,10 +115,6 @@ namespace {
 
         [[nodiscard]] bool valid() const noexcept {
             return ready_;
-        }
-
-        [[nodiscard]] bool unavailableByPermission() const noexcept {
-            return error_errno_ == EPERM || error_errno_ == EACCES;
         }
 
         [[nodiscard]] const char* errorStage() const noexcept {
@@ -248,8 +251,8 @@ namespace {
         int error_errno_{0};
     };
 
-    [[nodiscard]] bool shouldRunTcpListenerTests() noexcept {
-        const char* value = std::getenv("HYPERREDIS_RUN_TCP_LISTENER_TESTS");
+    [[nodiscard]] bool skipTcpListenerTests() noexcept {
+        const char* value = std::getenv("HYPERREDIS_SKIP_TCP_LISTENER_TESTS");
         return value != nullptr && std::string_view{value} == "1";
     }
 
@@ -299,6 +302,18 @@ namespace {
         return ExpireTimePoint{Milliseconds{ms}};
     }
 
+    [[nodiscard]] std::filesystem::path testPath(std::string_view name) {
+        return std::filesystem::temp_directory_path() / std::string(name);
+    }
+
+    [[nodiscard]] std::string readFileIfExists(const std::filesystem::path& path) {
+        if (!std::filesystem::exists(path)) {
+            return {};
+        }
+        std::ifstream input(path, std::ios::binary);
+        return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    }
+
     template<std::size_t N>
     [[nodiscard]] constexpr std::string_view literalBytes(const char (&value)[N]) noexcept {
         return {value, N - 1};
@@ -315,6 +330,12 @@ namespace {
         ASSERT_NE(bulk, nullptr);
         ASSERT_TRUE(bulk->value.has_value());
         EXPECT_EQ(*bulk->value, expected);
+    }
+
+    void expectNullBulkString(const RespValue& value) {
+        const auto* bulk = std::get_if<RespBulkString>(&value);
+        ASSERT_NE(bulk, nullptr);
+        EXPECT_FALSE(bulk->value.has_value());
     }
 
     void expectInteger(const RespValue& value, std::int64_t expected) {
@@ -344,6 +365,191 @@ TEST(RedisServerTest, StartsWithoutClients) {
     EXPECT_EQ(server.clientCount(), 0U);
     EXPECT_EQ(server.clientSession(10), nullptr);
     EXPECT_EQ(const_server.clientSession(10), nullptr);
+}
+
+TEST(RedisServerTest, RdbOperationsWithoutSaverReturnFalse) {
+    RedisServer server;
+    const auto now = makeTime(1'000);
+
+    EXPECT_FALSE(server.hasRdbSaver());
+    EXPECT_FALSE(server.saveRdb(now));
+    EXPECT_FALSE(server.loadRdb(now));
+}
+
+TEST(RedisServerTest, SaveAndLoadRdbThroughConfiguredSaver) {
+    const auto path = testPath("hyperredis-server-rdb-round-trip.rdb");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(1'000);
+    RedisClientContext client;
+    {
+        RedisServer source(2, nullptr, std::make_unique<RdbSaver>(path));
+        const std::array<std::string_view, 3> set_db0{"SET", "db0-key", "zero"};
+        const std::array<std::string_view, 2> select_db1{"SELECT", "1"};
+        const std::array<std::string_view, 3> set_db1{"SET", "db1-key", "one"};
+
+        EXPECT_TRUE(source.hasRdbSaver());
+        expectSimpleString(source.execute(client, set_db0, now), "OK");
+        expectSimpleString(source.execute(client, select_db1, now), "OK");
+        expectSimpleString(source.execute(client, set_db1, now), "OK");
+        ASSERT_TRUE(source.saveRdb(now));
+        ASSERT_TRUE(std::filesystem::is_regular_file(path));
+    }
+
+    RedisServer target(2, nullptr, std::make_unique<RdbSaver>(path));
+    RedisClientContext target_client;
+    const std::array<std::string_view, 2> get_db0{"GET", "db0-key"};
+    const std::array<std::string_view, 2> select_db1{"SELECT", "1"};
+    const std::array<std::string_view, 2> get_db1{"GET", "db1-key"};
+
+    EXPECT_TRUE(target.hasRdbSaver());
+    ASSERT_TRUE(target.loadRdb(now));
+    expectBulkString(target.execute(target_client, get_db0, now), "zero");
+    expectSimpleString(target.execute(target_client, select_db1, now), "OK");
+    expectBulkString(target.execute(target_client, get_db1, now), "one");
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, LoadMissingRdbKeepsExistingData) {
+    const auto path = testPath("hyperredis-server-missing-load.rdb");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(1'000);
+    RedisServer server(1, nullptr, std::make_unique<RdbSaver>(path));
+    RedisClientContext client;
+    const std::array<std::string_view, 3> set_args{"SET", "keep", "value"};
+    const std::array<std::string_view, 2> get_args{"GET", "keep"};
+
+    expectSimpleString(server.execute(client, set_args, now), "OK");
+    EXPECT_FALSE(server.loadRdb(now));
+    expectBulkString(server.execute(client, get_args, now), "value");
+}
+
+TEST(RedisServerTest, LoadBadRdbKeepsExistingData) {
+    const auto path = testPath("hyperredis-server-bad-load.rdb");
+    std::filesystem::remove(path);
+
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(output);
+        output << "not an rdb";
+    }
+
+    const auto now = makeTime(1'000);
+    RedisServer server(1, nullptr, std::make_unique<RdbSaver>(path));
+    RedisClientContext client;
+    const std::array<std::string_view, 3> set_args{"SET", "keep", "value"};
+    const std::array<std::string_view, 2> get_args{"GET", "keep"};
+
+    expectSimpleString(server.execute(client, set_args, now), "OK");
+    EXPECT_FALSE(server.loadRdb(now));
+    expectBulkString(server.execute(client, get_args, now), "value");
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, WriteCommandAppendsToConfiguredAof) {
+    const auto path = testPath("hyperredis-server-aof-write.aof");
+    std::filesystem::remove(path);
+
+    RedisServer server(1, std::make_unique<AofAppender>(path), nullptr);
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+    const std::array<std::string_view, 3> set_args{"SET", "key", "value"};
+
+    expectSimpleString(server.execute(client, set_args, now), "OK");
+
+    EXPECT_EQ(readFileIfExists(path), serializeRespCommand(set_args));
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, ReadCommandDoesNotAppendToConfiguredAof) {
+    const auto path = testPath("hyperredis-server-aof-read.aof");
+    std::filesystem::remove(path);
+
+    RedisServer server(1, std::make_unique<AofAppender>(path), nullptr);
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+    ASSERT_NE(server.manager().db(0), nullptr);
+    server.manager().db(0)->set("key", RedisObject::createSharedStringObject("value"));
+    const std::array<std::string_view, 2> get_args{"GET", "key"};
+
+    expectBulkString(server.execute(client, get_args, now), "value");
+
+    EXPECT_EQ(readFileIfExists(path), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, FailedWriteCommandDoesNotAppendToConfiguredAof) {
+    const auto path = testPath("hyperredis-server-aof-failed-write.aof");
+    std::filesystem::remove(path);
+
+    RedisServer server(1, std::make_unique<AofAppender>(path), nullptr);
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+    ASSERT_NE(server.manager().db(0), nullptr);
+    server.manager().db(0)->set("key", RedisObject::createSharedStringObject("not-an-int"));
+    const std::array<std::string_view, 2> incr_args{"INCR", "key"};
+
+    expectError(server.execute(client, incr_args, now),
+                "ERR value is not an integer or out of range");
+
+    EXPECT_EQ(readFileIfExists(path), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, AofFailureRejectsLaterWriteButStillAllowsReads) {
+    const auto path = testPath("hyperredis-server-aof-as-directory.aof");
+    std::filesystem::remove_all(path);
+    ASSERT_TRUE(std::filesystem::create_directory(path));
+
+    RedisServer server(1, std::make_unique<AofAppender>(path), nullptr);
+    RedisClientContext client;
+    const auto now = makeTime(1'000);
+    const std::array<std::string_view, 3> first_set{"SET", "first", "value"};
+    const std::array<std::string_view, 3> second_set{"SET", "second", "value"};
+    const std::array<std::string_view, 2> get_first{"GET", "first"};
+
+    expectError(server.execute(client, first_set, now), "ERR append only file write failed");
+    expectError(server.execute(client, second_set, now), "ERR append only file write failed");
+    expectBulkString(server.execute(client, get_first, now), "value");
+    expectNullBulkString(server.execute(client, std::array<std::string_view, 2>{"GET", "second"}, now));
+
+    std::filesystem::remove_all(path);
+}
+
+TEST(RedisServerTest, LoadAofSynchronizesAppenderSelectedDbIndex) {
+    const auto path = testPath("hyperredis-server-load-aof-selected-db.aof");
+    std::filesystem::remove(path);
+
+    const auto now = makeTime(1'000);
+    const std::array<std::string_view, 3> db1_set{"SET", "db1-key", "one"};
+    const std::array<std::string_view, 3> db0_set{"SET", "db0-key", "zero"};
+    const std::array<std::string_view, 2> select_db1{"SELECT", "1"};
+    const std::array<std::string_view, 2> select_db0{"SELECT", "0"};
+
+    {
+        AofAppender appender(path);
+        ASSERT_TRUE(appender.appendCommand(1, db1_set, now));
+    }
+
+    RedisServer server(2, std::make_unique<AofAppender>(path), nullptr);
+    RedisClientContext client;
+
+    ASSERT_TRUE(server.loadAof(now));
+    expectSimpleString(server.execute(client, db0_set, now), "OK");
+
+    EXPECT_EQ(readFileIfExists(path),
+              serializeRespCommand(select_db1)
+                  + serializeRespCommand(db1_set)
+                  + serializeRespCommand(select_db0)
+                  + serializeRespCommand(db0_set));
+
+    std::filesystem::remove(path);
 }
 
 TEST(RedisServerTest, AddClientStoresSessionByFd) {
@@ -505,8 +711,8 @@ TEST(RedisServerTest, AttachListenerAcceptsPendingClient) {
     RedisServer server;
     EventLoop loop;
     LocalStreamListener listener;
-    if (!listener.valid() && listener.unavailableByPermission()) {
-        GTEST_SKIP() << "listening sockets are not permitted in this environment";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
     ASSERT_TRUE(listener.valid()) << listener.errorStage() << " failed with errno " << listener.errorNumber();
 
@@ -522,8 +728,8 @@ TEST(RedisServerTest, AttachedListenerClientCanProcessPing) {
     RedisServer server;
     EventLoop loop;
     LocalStreamListener listener;
-    if (!listener.valid() && listener.unavailableByPermission()) {
-        GTEST_SKIP() << "listening sockets are not permitted in this environment";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
     ASSERT_TRUE(listener.valid()) << listener.errorStage() << " failed with errno " << listener.errorNumber();
     const auto ping = serializeRespCommand(std::array<std::string_view, 1>{"PING"});
@@ -539,8 +745,8 @@ TEST(RedisServerTest, AttachedListenerClientCanProcessPing) {
 }
 
 TEST(RedisServerTcpIntegrationTest, ProductionTcpListenerAcceptsClientAndProcessesPing) {
-    if (!shouldRunTcpListenerTests()) {
-        GTEST_SKIP() << "set HYPERREDIS_RUN_TCP_LISTENER_TESTS=1 to run TCP listener integration tests";
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
 
     TcpListenOptions options;

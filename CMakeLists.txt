@@ -33,6 +33,7 @@ set(SERVER_CORE_SOURCES
         src/server/redis_server.cpp
         src/server/tcp_listener.cpp
         src/server/redis_server_runner.cpp
+        src/server/server_options.cpp
 )
 
 set(HYPERREDIS_CORE_SOURCES
@@ -115,6 +116,7 @@ set(HYPERREDIS_TESTS
         tcp_listener_test
         redis_server_runner_test
         redis_server_test
+        server_options_test
 )
 
 foreach (test_target IN LISTS HYPERREDIS_TESTS)
