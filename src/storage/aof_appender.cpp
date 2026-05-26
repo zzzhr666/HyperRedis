@@ -67,6 +67,17 @@ bool hyper::AofAppender::appendCommand(std::size_t db_index, std::span<const std
 }
 
 
+bool hyper::AofAppender::flushIfNeeded(ExpireTimePoint now) {
+    if (broken_) {
+        return false;
+    }
+    if (!syncIfDue_(now)) {
+        closeFd_();
+        broken_ = true;
+        return false;
+    }
+    return true;
+}
 
 bool hyper::AofAppender::syncIfDue_(ExpireTimePoint now) {
     if (!fsync_pending_) {

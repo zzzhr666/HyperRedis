@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <poll.h>
+#include <ranges>
 #include <vector>
 
 namespace {
@@ -40,7 +41,7 @@ namespace {
     }
 }
 
-hyper::EventLoop::EventLoop() : stopped_(false) {}
+hyper::EventLoop::EventLoop() : next_time_event_id_(1), stopped_(false) {}
 
 bool hyper::EventLoop::addFileEvent(int fd, FileEventMask mask, const FileCallback& callback) {
     if (fd < 0 || mask == FileEventMask::None || !callback) {
@@ -86,10 +87,13 @@ int hyper::EventLoop::runOnce(std::chrono::milliseconds timeout) {
         poll_fd.events = toPollEvents(file_event.mask);
         poll_fds.push_back(poll_fd);
     }
-
-    int ready = poll(poll_fds.data(), poll_fds.size(), toPollTimeout(timeout));
-    if (ready <= 0) {
+    auto poll_timeout = nearestTimeEventTimeout_(timeout);
+    int ready = poll(poll_fds.data(), poll_fds.size(), toPollTimeout(poll_timeout));
+    if (ready < 0) {
         return ready;
+    }
+    if (ready == 0) {
+        return static_cast<int>(processDueTimeEvents_());
     }
 
     std::size_t count{0};
@@ -127,5 +131,80 @@ int hyper::EventLoop::runOnce(std::chrono::milliseconds timeout) {
             ++count;
         }
     }
+    count += processDueTimeEvents_();
     return static_cast<int>(count);
+}
+
+std::optional<hyper::EventLoop::TimeEventId> hyper::EventLoop::addTimeEvent(std::chrono::milliseconds delay,
+                                                                            const TimeCallback& callback) {
+    if (!callback) {
+        return std::nullopt;
+    }
+    TimeEventId id = next_time_event_id_++;
+    if (delay < std::chrono::milliseconds{0}) {
+        delay = std::chrono::milliseconds{0};
+    }
+    time_events_.emplace(id, TimeEvent{TimeClock::now() + delay, callback});
+    return id;
+}
+
+bool hyper::EventLoop::removeTimeEvent(TimeEventId id) {
+    if (auto it = time_events_.find(id); it != time_events_.end()) {
+        time_events_.erase(it);
+        return true;
+    }
+    return false;
+}
+
+size_t hyper::EventLoop::processDueTimeEvents_() {
+    auto now = TimeClock::now();
+    std::vector<TimeEventId> ids;
+    for (const auto& [id,time_event] : time_events_) {
+        auto& deadline = time_event.deadline;
+        if (deadline <= now) {
+            ids.emplace_back(id);
+        }
+    }
+    std::size_t fired{0};
+    for (const auto id : ids) {
+        auto it = time_events_.find(id);
+        if (it == time_events_.end()) {
+            continue;
+        }
+        auto callback = it->second.callback;
+        auto next_delay_opt = callback();
+        ++fired;
+        auto after_it = time_events_.find(id);
+        if (after_it == time_events_.end()) {
+            continue;
+        }
+        if (next_delay_opt.has_value()) {
+            after_it->second.deadline = TimeClock::now() + next_delay_opt.value();
+        } else {
+            time_events_.erase(after_it);
+        }
+    }
+
+    return fired;
+}
+
+std::chrono::milliseconds hyper::EventLoop::nearestTimeEventTimeout_(std::chrono::milliseconds timeout) const {
+    if (time_events_.empty()) {
+        return timeout;
+    }
+    auto now = TimeClock::now();
+    TimeClock::time_point nearest_timepoint{time_events_.begin()->second.deadline};
+    for (const auto& time_event: time_events_ | std::views::values) {
+        const auto ddl = time_event.deadline;
+        nearest_timepoint = std::min(nearest_timepoint,ddl);
+        if (ddl <= now) {
+            return std::chrono::milliseconds{0};
+        }
+    }
+
+    auto remaining = std::chrono::ceil<std::chrono::milliseconds>(nearest_timepoint - now);
+    if (timeout.count() < 0) {
+        return remaining;
+    }
+    return std::min(timeout,remaining);
 }

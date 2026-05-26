@@ -42,6 +42,8 @@ namespace hyper {
             selected_db_index_ = db_index;
         }
 
+        bool flushIfNeeded(ExpireTimePoint now);
+
     private:
         [[nodiscard]] bool syncIfDue_(ExpireTimePoint now);
 

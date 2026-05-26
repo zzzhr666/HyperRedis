@@ -910,3 +910,22 @@ TEST(RedisServerTest, ActiveExpireCycleIncreasesDirtyCountByDeletedKeys) {
 
     EXPECT_EQ(server.dirtyCount(), 6);
 }
+
+TEST(RedisServerTest, ServerCronRunsActiveExpireCycle) {
+    RedisServer server(2);
+    const auto now = makeTime(1'000);
+    auto* db0 = server.manager().db(0);
+    auto* db1 = server.manager().db(1);
+    ASSERT_NE(db0, nullptr);
+    ASSERT_NE(db1, nullptr);
+
+    db0->set("db0-key", RedisObject::createSharedStringObject("zero"));
+    db1->set("db1-key", RedisObject::createSharedStringObject("one"));
+    ASSERT_TRUE(db0->expireAfter("db0-key", Milliseconds{10}, now));
+    ASSERT_TRUE(db1->expireAfter("db1-key", Milliseconds{10}, now));
+
+    EXPECT_EQ(server.serverCron(now + Milliseconds{10}), 2);
+    EXPECT_EQ(server.dirtyCount(), 2);
+    EXPECT_EQ(db0->get("db0-key", now + Milliseconds{10}), nullptr);
+    EXPECT_EQ(db1->get("db1-key", now + Milliseconds{10}), nullptr);
+}

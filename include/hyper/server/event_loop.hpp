@@ -1,10 +1,12 @@
 #pragma once
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <type_traits>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 
 
 namespace hyper {
@@ -42,7 +44,8 @@ namespace hyper {
     class EventLoop {
     public:
         using FileCallback = std::function<void(int, FileEventMask)>;
-
+        using TimeEventId = std::uint64_t;
+        using TimeCallback = std::function<std::optional<std::chrono::milliseconds>()>;
 
         EventLoop();
         bool addFileEvent(int fd, FileEventMask mask, const FileCallback& callback);
@@ -59,7 +62,16 @@ namespace hyper {
             stopped_ = true;
         }
 
+        std::optional<TimeEventId> addTimeEvent(std::chrono::milliseconds delay, const TimeCallback& callback);
+
+        bool removeTimeEvent(TimeEventId id);
+
         ~EventLoop() = default;
+
+    private:
+        size_t processDueTimeEvents_();
+
+        std::chrono::milliseconds nearestTimeEventTimeout_(std::chrono::milliseconds timeout) const;
 
     private:
         struct FileEvent {
@@ -68,7 +80,16 @@ namespace hyper {
             FileCallback writable_callback;
         };
 
+        using TimeClock = std::chrono::steady_clock;
+
+        struct TimeEvent {
+            TimeClock::time_point deadline;
+            TimeCallback callback;
+        };
+
         std::unordered_map<int, FileEvent> file_events_;
+        std::unordered_map<TimeEventId, TimeEvent> time_events_;
+        TimeEventId next_time_event_id_;
         bool stopped_;
     };
 }

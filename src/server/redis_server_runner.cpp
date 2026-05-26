@@ -3,7 +3,12 @@
 #include "hyper/storage/aof_appender.hpp"
 #include "hyper/storage/rdb_saver.hpp"
 
-hyper::RedisServerRunner::RedisServerRunner() : server_(nullptr), running_(false), save_rdb_on_stop_(false) {}
+namespace {
+    constexpr auto ServerCronInterval = std::chrono::milliseconds{100};
+}
+
+hyper::RedisServerRunner::RedisServerRunner()
+    : server_(nullptr), running_(false), save_rdb_on_stop_(false), server_cron_event_id_(std::nullopt) {}
 
 hyper::RedisServerRunner::~RedisServerRunner() = default;
 
@@ -12,7 +17,6 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
         return false;
     }
     save_rdb_on_stop_ = false;
-
 
     auto& [listen_option , db_count,persistence_config] = config;
     if ((persistence_config.load_rdb_on_start || persistence_config.save_rdb_on_stop) &&
@@ -55,6 +59,22 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
     }
 
     server_ = std::move(server);
+
+    server_cron_event_id_ = loop_.addTimeEvent(
+        ServerCronInterval, [this]()-> std::optional<std::chrono::milliseconds> {
+            if (!running_ || server_ == nullptr) {
+                return std::nullopt;
+            }
+            server_->serverCron(ExpireClock::now());
+            return ServerCronInterval;
+        });
+    if (!server_cron_event_id_.has_value()) {
+        server_->detachListener(loop_,listener_->fd());
+        listener_.reset();
+        server.reset();
+        return false;
+    }
+
     running_ = true;
 
     save_rdb_on_stop_ = persistence_config.save_rdb_on_stop;
@@ -70,6 +90,10 @@ void hyper::RedisServerRunner::runOnce(std::chrono::milliseconds timeout) {
 void hyper::RedisServerRunner::stop() {
     if (!running_) {
         return;
+    }
+    if (server_cron_event_id_.has_value()) {
+        loop_.removeTimeEvent(server_cron_event_id_.value());
+        server_cron_event_id_.reset();
     }
     server_->detachListener(loop_, listener_.value().fd());
     listener_.reset();

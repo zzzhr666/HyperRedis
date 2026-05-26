@@ -438,7 +438,6 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - 暂未实现 `COMMAND`、`INFO`、`CONFIG` 等 redis-cli 辅助命令。
 - 暂未实现 AUTH、ACL、复制、Sentinel、Cluster。
 - 服务端目前是单线程事件循环，没有后台任务线程。
-- 暂未实现 serverCron/time event 骨架，主动过期、AOF everysec fsync 等周期任务还没有统一调度。
 - Ctrl-C/SIGTERM 已能触发 runner 停止和按配置保存 RDB，但还没有更完整的 server shutdown 状态机。
 - 启动失败时错误信息仍较粗，需要进一步携带 bind/listen errno。
 - 尚未做系统性 benchmark。
@@ -463,7 +462,7 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - [x] Ctrl-C/SIGTERM 触发 `RedisServerRunner::stop()`
 - [x] `--help` 区分正常退出和参数错误
 - [ ] 启动失败返回更具体 errno 信息
-- [ ] 设计 serverCron/time event，周期执行主动过期和 AOF everysec fsync
+- [x] 设计 serverCron/time event，周期执行主动过期和 AOF everysec fsync
 
 ### 持久化接入
 
@@ -471,7 +470,7 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - [x] 服务端关闭时按配置同步保存 RDB-like 快照
 - [x] 将 AOF append 接入真实 TCP 写命令路径
 - [x] AOF 启动恢复后同步后续 append 的 DB 选择状态
-- [ ] 在 serverCron 中调度 AOF everysec fsync
+- [x] 在 serverCron 中调度 AOF everysec fsync
 - [ ] 增加同步 `SAVE` 命令入口
 - [ ] 设计 `BGSAVE` / `BGWRITEAOF` 的后台任务状态模型
 

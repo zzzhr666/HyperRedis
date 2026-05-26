@@ -14,7 +14,9 @@
 #include "hyper/time.hpp"
 #include "hyper/storage/aof_replayer.hpp"
 
-
+namespace {
+    static constexpr std::size_t CheckKeysNumber = 20;
+}
 namespace {
     bool setNonBlocking(int fd) noexcept {
         const int flags = ::fcntl(fd,F_GETFL, 0);
@@ -187,6 +189,14 @@ bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
         return true;
     }
     return false;
+}
+
+std::size_t hyper::RedisServer::serverCron(ExpireTimePoint now) {
+    std::size_t done = activeExpireCycle(now,CheckKeysNumber);
+    if (aof_appender_) {
+        aof_appender_->flushIfNeeded(now);
+    }
+    return done;
 }
 
 void hyper::RedisServer::enableClientWritable_(EventLoop& loop, int fd) {

@@ -16,6 +16,8 @@ namespace hyper {
 
     class RedisServer {
     public:
+
+
         RedisServer(std::size_t db_count, std::unique_ptr<AofAppender> aof_appender,
                     std::unique_ptr<RdbSaver> rdb_saver);
 
@@ -72,6 +74,8 @@ namespace hyper {
             return aof_appender_ != nullptr;
         }
         [[nodiscard]] bool loadAof(ExpireTimePoint now);
+
+        std::size_t serverCron(ExpireTimePoint now);
 
     private:
         void enableClientWritable_(EventLoop& loop, int fd);

@@ -324,6 +324,38 @@ TEST(RedisServerRunnerTest, ProcessesPingOverTcp) {
               literalBytes("+PONG\r\n"));
 }
 
+TEST(RedisServerRunnerTest, ServerCronActivelyExpiresKeys) {
+    if (skipTcpListenerTests()) {
+        GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
+    }
+
+    RedisServerRunner runner;
+    ASSERT_TRUE(runner.start(portZeroConfig()));
+
+    TcpClient client(runner.port());
+    ASSERT_TRUE(client.valid()) << client.errorStage() << " failed with errno " << client.errorNumber();
+
+    const auto set = serializeRespCommand(std::array<std::string_view, 3>{"SET", "cron-key", "value"});
+    ASSERT_EQ(::write(client.fd(), set.data(), set.size()), static_cast<ssize_t>(set.size()));
+    EXPECT_EQ(readReplyWhileRunning(runner, client.fd(), literalBytes("+OK\r\n")),
+              literalBytes("+OK\r\n"));
+
+    const auto expire = serializeRespCommand(std::array<std::string_view, 3>{"PEXPIRE", "cron-key", "10"});
+    ASSERT_EQ(::write(client.fd(), expire.data(), expire.size()), static_cast<ssize_t>(expire.size()));
+    EXPECT_EQ(readReplyWhileRunning(runner, client.fd(), literalBytes(":1\r\n")),
+              literalBytes(":1\r\n"));
+
+    runner.runOnce(std::chrono::milliseconds{150});
+    runner.runOnce(std::chrono::milliseconds{150});
+
+    const auto dbsize = serializeRespCommand(std::array<std::string_view, 1>{"DBSIZE"});
+    ASSERT_EQ(::write(client.fd(), dbsize.data(), dbsize.size()), static_cast<ssize_t>(dbsize.size()));
+    EXPECT_EQ(readReplyWhileRunning(runner, client.fd(), literalBytes(":0\r\n")),
+              literalBytes(":0\r\n"));
+
+    runner.stop();
+}
+
 TEST(RedisServerRunnerTest, AofOptionAppendsTcpWriteCommand) {
     if (skipTcpListenerTests()) {
         GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <chrono>
+#include <optional>
 #include <unistd.h>
 
 #include "hyper/server/event_loop.hpp"
@@ -134,4 +135,98 @@ TEST(EventLoopTest, ReadableCallbackCanRemoveWritableBeforeItFires) {
     EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 1);
     EXPECT_EQ(readable_calls, 1);
     EXPECT_EQ(writable_calls, 0);
+}
+
+TEST(EventLoopTest, TimeEventFiresWhenDelayExpires) {
+    EventLoop loop;
+    int calls{0};
+
+    const auto id = loop.addTimeEvent(std::chrono::milliseconds{0},
+                                      [&]() -> std::optional<std::chrono::milliseconds> {
+                                          ++calls;
+                                          return std::nullopt;
+                                      });
+
+    ASSERT_TRUE(id.has_value());
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 1);
+    EXPECT_EQ(calls, 1);
+
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 0);
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(EventLoopTest, TimeEventDoesNotFireBeforeDelay) {
+    EventLoop loop;
+    int calls{0};
+
+    const auto id = loop.addTimeEvent(std::chrono::milliseconds{20},
+                                      [&]() -> std::optional<std::chrono::milliseconds> {
+                                          ++calls;
+                                          return std::nullopt;
+                                      });
+
+    ASSERT_TRUE(id.has_value());
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 0);
+    EXPECT_EQ(calls, 0);
+
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{100}), 1);
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(EventLoopTest, TimeEventShortensPollTimeout) {
+    EventLoop loop;
+    int calls{0};
+
+    const auto id = loop.addTimeEvent(std::chrono::milliseconds{20},
+                                      [&]() -> std::optional<std::chrono::milliseconds> {
+                                          ++calls;
+                                          return std::nullopt;
+                                      });
+
+    ASSERT_TRUE(id.has_value());
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{200}), 1);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_EQ(calls, 1);
+    EXPECT_LT(elapsed, std::chrono::milliseconds{150});
+}
+
+TEST(EventLoopTest, RepeatingTimeEventUsesReturnedDelay) {
+    EventLoop loop;
+    int calls{0};
+
+    const auto id = loop.addTimeEvent(std::chrono::milliseconds{0},
+                                      [&]() -> std::optional<std::chrono::milliseconds> {
+                                          ++calls;
+                                          if (calls < 3) {
+                                              return std::chrono::milliseconds{0};
+                                          }
+                                          return std::nullopt;
+                                      });
+
+    ASSERT_TRUE(id.has_value());
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 1);
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 1);
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 1);
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 0);
+    EXPECT_EQ(calls, 3);
+}
+
+TEST(EventLoopTest, RemovedTimeEventDoesNotFire) {
+    EventLoop loop;
+    int calls{0};
+
+    const auto id = loop.addTimeEvent(std::chrono::milliseconds{0},
+                                      [&]() -> std::optional<std::chrono::milliseconds> {
+                                          ++calls;
+                                          return std::nullopt;
+                                      });
+
+    ASSERT_TRUE(id.has_value());
+    loop.removeTimeEvent(*id);
+
+    EXPECT_EQ(loop.runOnce(std::chrono::milliseconds{0}), 0);
+    EXPECT_EQ(calls, 0);
 }
