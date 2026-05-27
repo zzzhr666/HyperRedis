@@ -7,9 +7,10 @@
 #include "redis_manager.hpp"
 
 
+#include "hyper/version.hpp"
+
+
 namespace hyper {
-    static constexpr std::string_view Magic = "REDIS";
-    static constexpr std::string_view Version = "0009";
 
     static constexpr std::uint8_t OpCode_Idle = 248;
     static constexpr std::uint8_t OpCode_Freq = 249;

@@ -72,7 +72,10 @@ namespace hyper {
         ZRevRange,
         ZIncrBy,
         ZRemRangeByRank,
-        ZRemRangeByScore
+        ZRemRangeByScore,
+        Save,
+        LastSave,
+        Info
     };
 
     struct CommandSpec {

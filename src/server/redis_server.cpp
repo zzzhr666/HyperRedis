@@ -12,11 +12,13 @@
 #include "hyper/storage/aof_appender.hpp"
 #include "hyper/storage/rdb_saver.hpp"
 #include "hyper/time.hpp"
+#include "hyper/version.hpp"
 #include "hyper/storage/aof_replayer.hpp"
 
 namespace {
-    static constexpr std::size_t CheckKeysNumber = 20;
+    constexpr std::size_t CheckKeysNumber = 20;
 }
+
 namespace {
     bool setNonBlocking(int fd) noexcept {
         const int flags = ::fcntl(fd,F_GETFL, 0);
@@ -30,7 +32,7 @@ namespace {
 hyper::RedisServer::RedisServer(std::size_t db_count, std::unique_ptr<AofAppender> aof_appender,
                                 std::unique_ptr<RdbSaver> rdb_saver)
     : manager_(db_count), aof_appender_(std::move(aof_appender)), rdb_saver_(std::move(rdb_saver)),
-      processor_(aof_appender_.get()), dirty_count_(0) {}
+      processor_(aof_appender_.get()), dirty_count_(0), last_save_time_(ExpireClock::now()) {}
 
 hyper::RedisServer::RedisServer(std::size_t db_count)
     : RedisServer(db_count, nullptr, nullptr) {}
@@ -66,6 +68,29 @@ hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, Command
     if (res && res->write && !std::holds_alternative<RespError>(execute_res)) {
         ++dirty_count_;
     }
+
+    if (res && res->command_name == CommandName::Save && !std::holds_alternative<RespError>(execute_res)) {
+        if (!hasRdbSaver()) {
+            return respError("ERR save is not configured");
+        }
+        bool save_success = saveRdb(now);
+        if (!save_success) {
+            return respError("ERR save failed");
+        }
+        dirty_count_ = 0;
+        last_save_time_ = now;
+    }
+
+    if (res && res->command_name == CommandName::LastSave && !std::holds_alternative<RespError>(execute_res)) {
+        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(last_save_time_.time_since_epoch());
+        return respInteger(seconds.count());
+    }
+
+    if (res && res->command_name == CommandName::Info && !std::holds_alternative<RespError>(execute_res)) {
+        std::string info_string = generateInfoString(args);
+        return respBulk(std::move(info_string));
+    }
+
     return execute_res;
 }
 
@@ -192,7 +217,7 @@ bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
 }
 
 std::size_t hyper::RedisServer::serverCron(ExpireTimePoint now) {
-    std::size_t done = activeExpireCycle(now,CheckKeysNumber);
+    std::size_t done = activeExpireCycle(now, CheckKeysNumber);
     if (aof_appender_) {
         aof_appender_->flushIfNeeded(now);
     }
@@ -227,4 +252,55 @@ bool hyper::RedisServer::adoptClient_(EventLoop& loop, int fd) {
     }
     ::close(fd);
     return false;
+}
+
+std::string hyper::RedisServer::generateInfoString(CommandExecutor::Args args) {
+    std::string section = "all";
+    if (args.size() > 1) {
+        section = args[1];
+        std::ranges::transform(section, section.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+    }
+    bool all = section == "all";
+    std::string res;
+    if (all || section == "server") {
+        res.append("# Server\r\n");
+        res.append("hyper_redis_version:" + std::string(ProjectVersion) + "\r\n");
+        res.append("rdb_version:" + std::string(RdbVersion) + "\r\n");
+        res.append("os:linux\r\n");
+    }
+
+    if (all || section == "client") {
+        if (all) {
+            res.append("\r\n");
+        }
+        res.append("# Clients\r\n");
+        res.append("connected_clients:" + std::to_string(client_sessions_.size()) + "\r\n");
+    }
+    if (all || section == "persistence") {
+        if (all) {
+            res.append("\r\n");
+        }
+        res.append("# Persistence\r\n");
+        res.append("rdb_changes_since_last_save:" + std::to_string(dirty_count_) + "\r\n");
+        auto last_save_seconds = std::chrono::duration_cast<std::chrono::seconds>(last_save_time_.time_since_epoch());
+        res.append("rdb_last_save_time:" + std::to_string(last_save_seconds.count()) + "\r\n");
+    }
+
+    if (all || section == "keyspace") {
+        if (all) {
+            res.append("\r\n");
+        }
+        res.append("# Keyspace\r\n");
+        for (std::size_t i = 0; i < manager_.dbCount(); ++i) {
+            if (auto db = manager_.db(i); db && db->size() > 0) {
+                res.append(
+                    "db" + std::to_string(i) + ":keys=" + std::to_string(db->size()) + ",expires=" + std::to_string(
+                        db->expireSize()) + "\r\n");
+            }
+        }
+    }
+
+    return res;
 }

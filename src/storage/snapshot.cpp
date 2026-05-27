@@ -399,8 +399,8 @@ namespace {
 
 std::vector<std::uint8_t> hyper::Snapshot::save(RedisManager& manager, ExpireTimePoint now) {
     RdbWriter writer;
-    writer.writeRaw(Magic);
-    writer.writeRaw(Version);
+    writer.writeRaw(RdbMagic);
+    writer.writeRaw(RdbVersion);
 
     for (std::size_t i = 0; i < manager.dbCount(); ++i) {
         auto db = manager.db(i);
@@ -433,12 +433,12 @@ std::vector<std::uint8_t> hyper::Snapshot::save(RedisManager& manager, ExpireTim
 bool hyper::Snapshot::load(const std::vector<std::uint8_t>& data, RedisManager& manager, ExpireTimePoint now) {
     RdbReader reader(data);
 
-    auto magic = reader.readRawString(5);
-    if (magic != "REDIS") {
+    auto magic = reader.readRawString(RdbMagic.size());
+    if (magic != RdbMagic) {
         return false;
     }
-    auto version = reader.readRawString(4);
-    if (version != "0009") {
+    auto version = reader.readRawString(RdbVersion.size());
+    if (version != RdbVersion) {
         return false;
     }
     RedisManager current_manager(manager.dbCount());

@@ -75,12 +75,18 @@ namespace hyper {
         }
         [[nodiscard]] bool loadAof(ExpireTimePoint now);
 
+        [[nodiscard]] ExpireTimePoint lastSaveTime() const noexcept {
+            return last_save_time_;
+        }
+
         std::size_t serverCron(ExpireTimePoint now);
 
     private:
         void enableClientWritable_(EventLoop& loop, int fd);
 
         bool adoptClient_(EventLoop& loop, int fd);
+
+        std::string generateInfoString(CommandExecutor::Args args);
 
     private:
         RedisManager manager_;
@@ -90,5 +96,6 @@ namespace hyper {
         std::size_t dirty_count_;
         std::unordered_map<int, ClientSession> client_sessions_;
         std::unordered_set<int> owned_client_fds_;
+        ExpireTimePoint last_save_time_;
     };
 }

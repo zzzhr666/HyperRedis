@@ -929,3 +929,121 @@ TEST(RedisServerTest, ServerCronRunsActiveExpireCycle) {
     EXPECT_EQ(db0->get("db0-key", now + Milliseconds{10}), nullptr);
     EXPECT_EQ(db1->get("db1-key", now + Milliseconds{10}), nullptr);
 }
+
+TEST(RedisServerTest, SaveCommandTriggersRdbPersistence) {
+    const auto path = testPath("save_command.rdb");
+    std::filesystem::remove(path);
+    
+    RedisServer server(1, nullptr, std::make_unique<RdbSaver>(path));
+    RedisClientContext client;
+    const auto now = makeTime(1000);
+
+    const std::array<std::string_view, 3> set_cmd{"SET", "key", "value"};
+    const std::array<std::string_view, 1> save_cmd{"SAVE"};
+
+    expectSimpleString(server.execute(client, set_cmd, now), "OK");
+    expectSimpleString(server.execute(client, save_cmd, now), "OK");
+
+    ASSERT_TRUE(std::filesystem::exists(path));
+    
+    // Verify content by loading it into another server
+    RedisServer loader(1, nullptr, std::make_unique<RdbSaver>(path));
+    ASSERT_TRUE(loader.loadRdb(now));
+    auto* db = loader.manager().db(0);
+    auto val = db->get("key", now);
+    ASSERT_NE(val, nullptr);
+    EXPECT_EQ(val->asString(), "value");
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, SaveCommandReturnsErrorWhenNoRdbSaver) {
+    RedisServer server(1);
+    RedisClientContext client;
+    const auto now = makeTime(1000);
+    const std::array<std::string_view, 1> save_cmd{"SAVE"};
+
+    const auto res = server.execute(client, save_cmd, now);
+    const auto* error = std::get_if<RespError>(&res);
+    ASSERT_NE(error, nullptr);
+    EXPECT_EQ(error->message, "ERR save is not configured");
+}
+
+TEST(RedisServerTest, LastSaveCommandReturnsRecentSaveTime) {
+    const auto path = testPath("lastsave_command.rdb");
+    std::filesystem::remove(path);
+    
+    RedisServer server(1, nullptr, std::make_unique<RdbSaver>(path));
+    RedisClientContext client;
+    const auto now = makeTime(1000LL * 123456789); // A specific Unix timestamp
+
+    const std::array<std::string_view, 1> lastsave_cmd{"LASTSAVE"};
+    const std::array<std::string_view, 1> save_cmd{"SAVE"};
+
+    // Initial lastsave should be roughly server start time (0 in our mocked now)
+    // After implementation, this might return the initial last_save_time_
+    
+    // Execute SAVE
+    expectSimpleString(server.execute(client, save_cmd, now), "OK");
+    
+    // LASTSAVE should now return 123456789
+    const auto res = server.execute(client, lastsave_cmd, now);
+    expectInteger(res, 123456789);
+
+    std::filesystem::remove(path);
+}
+
+TEST(RedisServerTest, InfoCommandReturnsSystemInformation) {
+    RedisServer server(2);
+    RedisClientContext client;
+    const auto now = makeTime(1000LL * 123456789);
+    
+    // Set some data to verify Keyspace and Persistence
+    const std::array<std::string_view, 3> set_cmd{"SET", "k1", "v1"};
+    const std::array<std::string_view, 3> expire_cmd{"EXPIRE", "k1", "10"};
+    (void)server.execute(client, set_cmd, now);
+    (void)server.execute(client, expire_cmd, now);
+
+    // 1. Test full INFO
+    {
+        const std::array<std::string_view, 1> info_cmd{"INFO"};
+        const auto res = server.execute(client, info_cmd, now);
+        const auto* bulk = std::get_if<RespBulkString>(&res);
+        ASSERT_NE(bulk, nullptr);
+        ASSERT_TRUE(bulk->value.has_value());
+        const std::string& s = *bulk->value;
+        
+        EXPECT_NE(s.find("# Server"), std::string::npos);
+        EXPECT_NE(s.find("hyper_redis_version:0.1.0"), std::string::npos);
+        EXPECT_NE(s.find("# Clients"), std::string::npos);
+        EXPECT_NE(s.find("# Persistence"), std::string::npos);
+        EXPECT_NE(s.find("rdb_changes_since_last_save:2"), std::string::npos);
+        EXPECT_NE(s.find("# Keyspace"), std::string::npos);
+        EXPECT_NE(s.find("db0:keys=1,expires=1"), std::string::npos);
+    }
+
+    // 2. Test specific section (Persistence)
+    {
+        const std::array<std::string_view, 2> info_persistence{"INFO", "persistence"};
+        const auto res = server.execute(client, info_persistence, now);
+        const auto* bulk = std::get_if<RespBulkString>(&res);
+        ASSERT_NE(bulk, nullptr);
+        const std::string& s = *bulk->value;
+
+        EXPECT_EQ(s.find("# Server"), std::string::npos);
+        EXPECT_NE(s.find("# Persistence"), std::string::npos);
+        EXPECT_NE(s.find("rdb_last_save_time:"), std::string::npos);
+    }
+
+    // 3. Test case insensitivity
+    {
+        const std::array<std::string_view, 2> info_caps{"INFO", "SERVER"};
+        const auto res = server.execute(client, info_caps, now);
+        const auto* bulk = std::get_if<RespBulkString>(&res);
+        ASSERT_NE(bulk, nullptr);
+        const std::string& s = *bulk->value;
+        EXPECT_NE(s.find("# Server"), std::string::npos);
+    }
+}
+
+

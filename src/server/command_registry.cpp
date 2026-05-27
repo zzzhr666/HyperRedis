@@ -7,7 +7,7 @@
 namespace {
     constexpr auto makeRegistry() {
 
-        constexpr std::size_t CommandNumber = 67;
+        constexpr std::size_t CommandNumber = 70;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -77,7 +77,10 @@ namespace {
                 {"ZREMRANGEBYRANK", 4, 4, hyper::CommandName::ZRemRangeByRank, true},
                 {"ZREMRANGEBYSCORE", 4, 4, hyper::CommandName::ZRemRangeByScore, true},
                 {"ZREVRANGE", 4, 5, hyper::CommandName::ZRevRange, false},
-                {"ZREVRANK", 3, 3, hyper::CommandName::ZRevRank, false}
+                {"ZREVRANK", 3, 3, hyper::CommandName::ZRevRank, false},
+                {"SAVE", 1, 1, hyper::CommandName::Save, false},
+                {"LASTSAVE", 1, 1, hyper::CommandName::LastSave, false},
+                {"INFO", 1, 2, hyper::CommandName::Info, false}
             }
         };
         std::ranges::sort(registry, {}, &hyper::CommandSpec::name);

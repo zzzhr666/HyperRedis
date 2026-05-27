@@ -276,6 +276,12 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
         return zRemRangeByRank_(manager, client, args, now);
     case CommandName::ZRemRangeByScore:
         return zRemRangeByScore_(manager, client, args, now);
+    case CommandName::Save:
+        return save_();
+    case CommandName::LastSave:
+        return lastSave_();
+    case CommandName::Info:
+        return info_();
     }
     return commandError(ErrUnknownCommand);
 }
@@ -475,6 +481,18 @@ hyper::RespValue hyper::CommandExecutor::renameNx_(RedisManager& manager, RedisC
 
     db->rename(old_key, new_key, now);
     return respInteger(1);
+}
+
+hyper::RespValue hyper::CommandExecutor::save_() const {
+    return respOk();
+}
+
+hyper::RespValue hyper::CommandExecutor::lastSave_() const {
+    return respInteger(0);
+}
+
+hyper::RespValue hyper::CommandExecutor::info_() const {
+    return respBulk("");
 }
 
 // =============================================================================

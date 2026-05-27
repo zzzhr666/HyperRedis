@@ -79,6 +79,12 @@ namespace hyper {
         [[nodiscard]] RespValue renameNx_(RedisManager& manager, RedisClientContext& client, Args args,
                                           ExpireTimePoint now) const;
 
+        [[nodiscard]] RespValue save_() const;
+
+        [[nodiscard]] RespValue lastSave_() const;
+
+        [[nodiscard]] RespValue info_() const;
+
         // --- String ---
         [[nodiscard]] RespValue set_(RedisManager& manager, RedisClientContext& client, Args args) const;
 

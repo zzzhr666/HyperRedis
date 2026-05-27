@@ -361,7 +361,7 @@ dict / intset / ziplist / skipList / linked_list
 
 | 分类           | 命令                                                                                                                                                        |
 |--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX` |
+| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX`、`SAVE`、`LASTSAVE`、`INFO` |
 | String       | `SET`、`GET`、`MGET`、`MSET`、`STRLEN`、`APPEND`、`INCR`、`DECR`、`INCRBY`、`INCRBYFLOAT`、`GETRANGE`、`SETRANGE`                                                    |
 | List         | `LPUSH`、`RPUSH`、`LPOP`、`RPOP`、`LLEN`、`LRANGE`、`LINDEX`、`LSET`、`LINSERT`、`LREM`、`LTRIM`                                                                    |
 | Hash         | `HSET`、`HGET`、`HDEL`、`HLEN`、`HGETALL`、`HEXISTS`、`HKEYS`、`HVALS`                                                                                           |
@@ -435,7 +435,7 @@ HYPERREDIS_RUN_TCP_LISTENER_TESTS=1 ./build/redis_server_test --gtest_filter='Re
 
 HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 server，不是生产级 Redis：
 
-- 暂未实现 `COMMAND`、`INFO`、`CONFIG` 等 redis-cli 辅助命令。
+- 暂未实现 `COMMAND`、`CONFIG` 等 redis-cli 辅助命令。
 - 暂未实现 AUTH、ACL、复制、Sentinel、Cluster。
 - 服务端目前是单线程事件循环，没有后台任务线程。
 - Ctrl-C/SIGTERM 已能触发 runner 停止和按配置保存 RDB，但还没有更完整的 server shutdown 状态机。
@@ -471,12 +471,13 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - [x] 将 AOF append 接入真实 TCP 写命令路径
 - [x] AOF 启动恢复后同步后续 append 的 DB 选择状态
 - [x] 在 serverCron 中调度 AOF everysec fsync
-- [ ] 增加同步 `SAVE` 命令入口
+- [x] 增加同步 `SAVE` 命令入口
 - [ ] 设计 `BGSAVE` / `BGWRITEAOF` 的后台任务状态模型
 
 ### 兼容性与性能
 
-- [ ] 增加 `COMMAND` / `INFO` 等 redis-cli 友好命令的最小兼容实现
+- [x] 增加 `INFO` 等 redis-cli 友好命令的最小兼容实现
+- [ ] 增加 `COMMAND` / `CONFIG` 等更多 redis-cli 友好命令
 - [ ] 增加更多 Redis 行为兼容测试
 - [ ] 增加 benchmark，量化命令执行、数据结构和网络层性能
 - [ ] 完善大请求、大响应、最大客户端数和 idle timeout
