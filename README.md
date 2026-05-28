@@ -203,7 +203,7 @@ HyperRedis/
 │       ├── command_registry.hpp    # 命令元信息、arity、写命令分类
 │       ├── command_executor.hpp    # Redis 命令执行器
 │       ├── command_processor.hpp   # 命令执行 + AOF 追加协调
-│       ├── event_loop.hpp          # poll-based 文件事件循环
+│       ├── event_loop.hpp          # epoll-based 文件事件循环
 │       ├── redis_server.hpp        # server 状态、client 管理、listener 接入
 │       ├── redis_server_runner.hpp # 组合 TcpListener / RedisServer / EventLoop
 │       └── tcp_listener.hpp        # TCP socket/bind/listen 封装

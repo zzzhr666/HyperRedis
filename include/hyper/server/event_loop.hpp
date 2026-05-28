@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <sys/epoll.h>
 
 
 namespace hyper {
@@ -66,7 +67,7 @@ namespace hyper {
 
         bool removeTimeEvent(TimeEventId id);
 
-        ~EventLoop() = default;
+        ~EventLoop();
 
     private:
         size_t processDueTimeEvents_();
@@ -90,6 +91,7 @@ namespace hyper {
         std::unordered_map<int, FileEvent> file_events_;
         std::unordered_map<TimeEventId, TimeEvent> time_events_;
         TimeEventId next_time_event_id_;
+        int epoll_fd_;
         bool stopped_;
     };
 }
