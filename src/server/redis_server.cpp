@@ -32,7 +32,8 @@ namespace {
 hyper::RedisServer::RedisServer(std::size_t db_count, std::unique_ptr<AofAppender> aof_appender,
                                 std::unique_ptr<RdbSaver> rdb_saver)
     : manager_(db_count), aof_appender_(std::move(aof_appender)), rdb_saver_(std::move(rdb_saver)),
-      processor_(aof_appender_.get()), dirty_count_(0), last_save_time_(ExpireClock::now()) {}
+      processor_(aof_appender_.get()), dirty_count_(0), last_save_time_(ExpireClock::now()),
+      total_commands_(0), start_time_(ExpireClock::now()) {}
 
 hyper::RedisServer::RedisServer(std::size_t db_count)
     : RedisServer(db_count, nullptr, nullptr) {}
@@ -56,6 +57,7 @@ std::size_t hyper::RedisServer::activeExpireCycle(ExpireTimePoint now, std::size
 
 hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, CommandExecutor::Args args,
                                              ExpireTimePoint now) {
+    ++total_commands_;
     const CommandSpec* res = nullptr;
     if (!args.empty()) {
         std::string cmd(args[0]);
@@ -268,6 +270,8 @@ std::string hyper::RedisServer::generateInfoString(CommandExecutor::Args args) {
         res.append("# Server\r\n");
         res.append("hyper_redis_version:" + std::string(ProjectVersion) + "\r\n");
         res.append("rdb_version:" + std::string(RdbVersion) + "\r\n");
+        auto uptime = std::chrono::duration_cast<std::chrono::seconds>(ExpireClock::now() - start_time_);
+        res.append("uptime_in_seconds:" + std::to_string(uptime.count()) + "\r\n");
         res.append("os:linux\r\n");
     }
 
@@ -278,6 +282,15 @@ std::string hyper::RedisServer::generateInfoString(CommandExecutor::Args args) {
         res.append("# Clients\r\n");
         res.append("connected_clients:" + std::to_string(client_sessions_.size()) + "\r\n");
     }
+
+    if (all || section == "stats") {
+        if (all) {
+            res.append("\r\n");
+        }
+        res.append("# Stats\r\n");
+        res.append("total_commands_processed:" + std::to_string(total_commands_) + "\r\n");
+    }
+
     if (all || section == "persistence") {
         if (all) {
             res.append("\r\n");

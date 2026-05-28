@@ -97,5 +97,7 @@ namespace hyper {
         std::unordered_map<int, ClientSession> client_sessions_;
         std::unordered_set<int> owned_client_fds_;
         ExpireTimePoint last_save_time_;
+        std::size_t total_commands_;
+        ExpireTimePoint start_time_;
     };
 }

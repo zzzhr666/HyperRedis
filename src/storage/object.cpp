@@ -49,10 +49,48 @@ namespace hyper {
         [[nodiscard]] bool isInvalidScore(double score) noexcept {
             return !std::isfinite(score);
         }
-
     }
 }
 
+
+std::string hyper::typeToString(ObjectType type) {
+    switch (type) {
+    case hyper::ObjectType::String:
+        return "string";
+    case hyper::ObjectType::List:
+        return "list";
+    case hyper::ObjectType::Set:
+        return "set";
+    case hyper::ObjectType::ZSet:
+        return "zset";
+    case hyper::ObjectType::Hash:
+        return "hash";
+        default:
+        return "unknown";
+    }
+
+}
+
+std::string hyper::encodingToString(ObjectEncoding encoding) {
+    switch (encoding) {
+    case ObjectEncoding::Raw:
+        return "raw";
+    case ObjectEncoding::Int:
+        return "int";
+    case ObjectEncoding::HashTable:
+        return "hashTable";
+    case ObjectEncoding::ZipList:
+        return "ziplist";
+    case ObjectEncoding::IntSet:
+        return "intset";
+    case ObjectEncoding::SkipList:
+        return "skiplist";
+    case ObjectEncoding::LinkedList:
+        return "linkedlist";
+    default:
+        return "unknown";
+    }
+}
 
 hyper::RedisObject::RedisObject(ObjectType type, ObjectEncoding encoding, ObjectData data, Token token)
     : type_(type), encoding_(encoding), data_(std::move(data)) {}
@@ -856,7 +894,7 @@ void hyper::RedisObject::listTrim(int start, int end) {
         return;
     }
     if (static_cast<std::size_t>(end) >= len) {
-        end = static_cast<int>(len )- 1;
+        end = static_cast<int>(len) - 1;
     }
     std::size_t ltrim = start;
     std::size_t rtrim = len - (end + 1);
@@ -1608,24 +1646,6 @@ void hyper::RedisObject::convertIntSetToSet_() {
 }
 
 
-std::optional<long> hyper::RedisObject::parseSetIntegerMember_(std::string_view member) {
-    if (member.empty()) {
-        return std::nullopt;
-    }
-
-    if (member.size() > 1) {
-        if (member[0] == '0' || (member[0] == '-' && member[1] == '0')) {
-            return std::nullopt;
-        }
-    }
-    long value{};
-    auto [ptr, ec] = std::from_chars(member.data(), member.data() + member.size(), value);
-    if (ptr == member.data() + member.size() && ec == std::errc()) {
-        return value;
-    }
-    return std::nullopt;
-}
-
 void hyper::RedisObject::convertZSetToSkiplist_() {
     assert(type_ == ObjectType::ZSet && encoding_ == ObjectEncoding::ZipList);
     auto z_set = std::make_unique<RedisZSet>();
@@ -1647,7 +1667,6 @@ void hyper::RedisObject::convertZSetToSkiplist_() {
     data_ = std::move(z_set);
 }
 
-
 double hyper::RedisObject::parseScore_(const ziplistEntryView& entry) {
     if (entry.isInteger()) {
         return static_cast<double>(entry.integer());
@@ -1663,6 +1682,7 @@ double hyper::RedisObject::parseScore_(const ziplistEntryView& entry) {
     assert(false);
     return 0.0;
 }
+
 
 std::string hyper::RedisObject::getEntryAsString_(const ziplistEntryView& entry) {
     if (entry.isInteger()) {
@@ -1683,4 +1703,22 @@ std::string hyper::RedisObject::formatScore_(double score) {
     }
     assert(false);
     return "";
+}
+
+std::optional<long> hyper::RedisObject::parseSetIntegerMember_(std::string_view member) {
+    if (member.empty()) {
+        return std::nullopt;
+    }
+
+    if (member.size() > 1) {
+        if (member[0] == '0' || (member[0] == '-' && member[1] == '0')) {
+            return std::nullopt;
+        }
+    }
+    long value{};
+    auto [ptr, ec] = std::from_chars(member.data(), member.data() + member.size(), value);
+    if (ptr == member.data() + member.size() && ec == std::errc()) {
+        return value;
+    }
+    return std::nullopt;
 }

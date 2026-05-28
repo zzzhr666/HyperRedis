@@ -17,7 +17,6 @@
 
 
 namespace {
-
     std::optional<std::size_t> parseSize(std::string_view size_str) {
         if (size_str.empty() || size_str.front() == '-') {
             return std::nullopt;
@@ -83,22 +82,6 @@ namespace {
         return hyper::respError(std::string(message));
     }
 
-    std::string typeToString(hyper::ObjectType type) {
-        switch (type) {
-        case hyper::ObjectType::String:
-            return "string";
-        case hyper::ObjectType::List:
-            return "list";
-        case hyper::ObjectType::Set:
-            return "set";
-        case hyper::ObjectType::ZSet:
-            return "zset";
-        case hyper::ObjectType::Hash:
-            return "hash";
-        }
-        assert(false);
-        return {}; //NOLINT
-    }
 
     std::optional<hyper::RedisDb::ExpireCondition> strToExpireCondition(std::string_view str) {
         std::string option{str};
@@ -282,6 +265,10 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
         return lastSave_();
     case CommandName::Info:
         return info_();
+    case CommandName::Object:
+        return object_(manager, client, args, now);
+    case CommandName::Time:
+        return time_();
     }
     return commandError(ErrUnknownCommand);
 }
@@ -493,6 +480,40 @@ hyper::RespValue hyper::CommandExecutor::lastSave_() const {
 
 hyper::RespValue hyper::CommandExecutor::info_() const {
     return respBulk("");
+}
+
+hyper::RespValue hyper::CommandExecutor::object_(RedisManager& manager, RedisClientContext& client, Args args,
+                                                 ExpireTimePoint now) const {
+    // TODO: Implement OBJECT ENCODING <key> and OBJECT REFCOUNT <key>
+    std::string sub_command(args[1]);
+    std::ranges::transform(sub_command, sub_command.begin(), [](unsigned char c) {
+        return std::toupper(c);
+    });
+    auto& key = args[2];
+    auto* db = client.currentDb(manager);
+    assert(db);
+    auto res = db->get(key, now);
+    if (res == nullptr) {
+        return respNullBulk();
+    }
+    if (sub_command == "ENCODING") {
+        return respBulk(encodingToString(res->getEncoding()));
+    }
+    if (sub_command == "REFCOUNT") {
+        return respInteger(res.use_count());
+    }
+
+    return commandError(ErrSyntaxError);
+}
+
+hyper::RespValue hyper::CommandExecutor::time_() const {
+    auto now = std::chrono::system_clock::now().time_since_epoch();
+    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
+    auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now - seconds);
+    auto arr = std::make_shared<RespArray>();
+    arr->values.emplace_back(respBulk(std::to_string(seconds.count())));
+    arr->values.emplace_back(respBulk(std::to_string(microseconds.count())));
+    return arr;
 }
 
 // =============================================================================

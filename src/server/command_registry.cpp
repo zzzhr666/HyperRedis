@@ -7,7 +7,7 @@
 namespace {
     constexpr auto makeRegistry() {
 
-        constexpr std::size_t CommandNumber = 70;
+        constexpr std::size_t CommandNumber = 72;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -53,6 +53,8 @@ namespace {
                 {"SISMEMBER", 3, 3, hyper::CommandName::SIsMember, false},
                 {"SMEMBERS", 2, 2, hyper::CommandName::SMembers, false},
                 {"SREM", 3, hyper::UnlimitedArity, hyper::CommandName::SRem, true},
+                {"SPOP", 2, 3, hyper::CommandName::SPop, true},
+                {"SRANDMEMBER", 2, 3, hyper::CommandName::SRandMember, false},
                 {"STRLEN", 2, 2, hyper::CommandName::StrLen, false},
                 {"TTL", 2, 2, hyper::CommandName::Ttl, false},
                 {"TYPE", 2, 2, hyper::CommandName::Type, false},
@@ -69,8 +71,6 @@ namespace {
                 {"LREM", 4, 4, hyper::CommandName::LRem, true},
                 {"LSET", 4, 4, hyper::CommandName::LSet, true},
                 {"LTRIM", 4, 4, hyper::CommandName::LTrim, true},
-                {"SPOP", 2, 3, hyper::CommandName::SPop, true},
-                {"SRANDMEMBER", 2, 3, hyper::CommandName::SRandMember, false},
                 {"ZCOUNT", 4, 4, hyper::CommandName::ZCount, false},
                 {"ZINCRBY", 4, 4, hyper::CommandName::ZIncrBy, true},
                 {"ZRANK", 3, 3, hyper::CommandName::ZRank, false},
@@ -80,7 +80,9 @@ namespace {
                 {"ZREVRANK", 3, 3, hyper::CommandName::ZRevRank, false},
                 {"SAVE", 1, 1, hyper::CommandName::Save, false},
                 {"LASTSAVE", 1, 1, hyper::CommandName::LastSave, false},
-                {"INFO", 1, 2, hyper::CommandName::Info, false}
+                {"INFO", 1, 2, hyper::CommandName::Info, false},
+                {"OBJECT", 3, 3, hyper::CommandName::Object, false},
+                {"TIME", 1, 1, hyper::CommandName::Time, false}
             }
         };
         std::ranges::sort(registry, {}, &hyper::CommandSpec::name);

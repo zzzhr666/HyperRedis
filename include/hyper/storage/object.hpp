@@ -29,6 +29,7 @@ namespace hyper {
     struct RedisSet;
 
 
+
     enum class ObjectType : std::uint8_t {
         String = 0,
         List,
@@ -36,6 +37,8 @@ namespace hyper {
         ZSet,
         Hash
     };
+
+    std::string typeToString(ObjectType type);
 
     enum class ObjectEncoding : std::uint8_t {
         Raw = 0,
@@ -46,6 +49,8 @@ namespace hyper {
         SkipList,
         LinkedList
     };
+
+    std::string encodingToString(ObjectEncoding encoding);
 
     /**
      * @brief Redis 对象数据变体

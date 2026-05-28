@@ -75,7 +75,9 @@ namespace hyper {
         ZRemRangeByScore,
         Save,
         LastSave,
-        Info
+        Info,
+        Object,
+        Time
     };
 
     struct CommandSpec {

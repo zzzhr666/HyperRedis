@@ -96,6 +96,8 @@ set(HYPERREDIS_TESTS
         intset_test
         ziplist_test
         object_test
+        object_command_test
+        time_command_test
         zset_test
         object_stress_test
         redis_object_redis_behavior_test
