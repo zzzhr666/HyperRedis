@@ -18,6 +18,19 @@ namespace {
     }
 }
 
+std::string hyper::policyToString(AofFsyncPolicy policy) {
+    switch (policy) {
+    case AofFsyncPolicy::No:
+        return "no";
+    case AofFsyncPolicy::Always:
+        return "always";
+    case AofFsyncPolicy::EverySecond:
+        return "everysec";
+    default:
+        return "unknown policy";
+    }
+}
+
 hyper::AofAppender::AofAppender(std::filesystem::path path, AofFsyncPolicy policy)
     : path_(std::move(path)), selected_db_index_(0), broken_(false),
       fsync_policy_(policy), fsync_pending_(false), fd_(-1) {}

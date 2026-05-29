@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <spdlog/common.h>
 
 #include "hyper/time.hpp"
 
@@ -15,6 +16,8 @@ namespace hyper {
         Always,
         EverySecond
     };
+
+    std::string policyToString(AofFsyncPolicy policy);
 
     class AofAppender {
     public:
@@ -40,6 +43,16 @@ namespace hyper {
 
         void setSelectedDbIndex(std::size_t db_index) noexcept {
             selected_db_index_ = db_index;
+        }
+
+
+        [[nodiscard]] AofFsyncPolicy fsyncPolicy() const noexcept {
+            return fsync_policy_;
+        }
+
+
+        void setFsyncPolicy(AofFsyncPolicy policy) noexcept {
+            fsync_policy_ = policy;
         }
 
         bool flushIfNeeded(ExpireTimePoint now);

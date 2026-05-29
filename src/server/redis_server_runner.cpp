@@ -8,7 +8,7 @@ namespace {
 }
 
 hyper::RedisServerRunner::RedisServerRunner()
-    : server_(nullptr), running_(false), save_rdb_on_stop_(false), server_cron_event_id_(std::nullopt) {}
+    : server_(nullptr), running_(false), server_cron_event_id_(std::nullopt) {}
 
 hyper::RedisServerRunner::~RedisServerRunner() = default;
 
@@ -16,8 +16,6 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
     if (running_) {
         return false;
     }
-    save_rdb_on_stop_ = false;
-
     auto& [listen_option , db_count,persistence_config] = config;
     if ((persistence_config.load_rdb_on_start || persistence_config.save_rdb_on_stop) &&
         !persistence_config.rdb_path.has_value()) {
@@ -59,13 +57,14 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
     }
 
     server_ = std::move(server);
+    server_->setSaveRdbOnStop(persistence_config.save_rdb_on_stop);
 
     server_cron_event_id_ = loop_.addTimeEvent(
         ServerCronInterval, [this]()-> std::optional<std::chrono::milliseconds> {
             if (!running_ || server_ == nullptr) {
                 return std::nullopt;
             }
-            server_->serverCron(ExpireClock::now());
+            server_->serverCron(loop_, ExpireClock::now());
             return ServerCronInterval;
         });
     if (!server_cron_event_id_.has_value()) {
@@ -77,7 +76,6 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
 
     running_ = true;
 
-    save_rdb_on_stop_ = persistence_config.save_rdb_on_stop;
     return true;
 }
 
@@ -97,7 +95,7 @@ void hyper::RedisServerRunner::stop() {
     }
     server_->detachListener(loop_, listener_.value().fd());
     listener_.reset();
-    if (save_rdb_on_stop_) {
+    if (server_->saveRdbOnStop()) {
         (void)server_->saveRdb(ExpireClock::now());
     }
     server_.reset();

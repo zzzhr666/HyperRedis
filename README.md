@@ -361,7 +361,7 @@ dict / intset / ziplist / skipList / linked_list
 
 | 分类           | 命令                                                                                                                                                        |
 |--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX`、`SAVE`、`LASTSAVE`、`INFO`、`TIME`、`OBJECT` |
+| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX`、`SAVE`、`LASTSAVE`、`INFO`、`TIME`、`OBJECT`、`CONFIG` |
 | String       | `SET`、`GET`、`MGET`、`MSET`、`STRLEN`、`APPEND`、`INCR`、`DECR`、`INCRBY`、`INCRBYFLOAT`、`GETRANGE`、`SETRANGE`                                                    |
 | List         | `LPUSH`、`RPUSH`、`LPOP`、`RPOP`、`LLEN`、`LRANGE`、`LINDEX`、`LSET`、`LINSERT`、`LREM`、`LTRIM`                                                                    |
 | Hash         | `HSET`、`HGET`、`HDEL`、`HLEN`、`HGETALL`、`HEXISTS`、`HKEYS`、`HVALS`                                                                                           |
@@ -501,10 +501,11 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 ### 兼容性与性能
 
 - [x] 增加 `INFO` 等 redis-cli 友好命令的最小兼容实现
-- [ ] 增加 `COMMAND` / `CONFIG` 等更多 redis-cli 友好命令
+- [x] 实现 `CONFIG` 管理命令，支持动态调整 `maxclients`、`timeout`、`appendfsync` 等
+- [ ] 增加 `COMMAND` 等更多 redis-cli 友好命令
 - [ ] 增加更多 Redis 行为兼容测试
 - [x] 增加 benchmark，量化命令执行、数据结构和网络层性能
-- [ ] 完善大请求、大响应、最大客户端数和 idle timeout
+- [x] 完善最大客户端数（maxclients）和空闲连接自动断开（timeout）
 - [ ] 在单机服务稳定后，再评估复制、Sentinel、Cluster 等分布式机制
 
 ---

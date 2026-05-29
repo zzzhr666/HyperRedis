@@ -51,7 +51,6 @@ namespace hyper {
         EventLoop loop_;
         std::optional<TcpListener> listener_;
         bool running_;
-        bool save_rdb_on_stop_;
         std::optional<EventLoop::TimeEventId> server_cron_event_id_;
     };
 }

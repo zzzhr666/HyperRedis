@@ -46,11 +46,16 @@ namespace hyper {
 
         void processInput(RedisServer& server, ExpireTimePoint now);
 
+        [[nodiscard]] ExpireTimePoint lastInteractionTime() const noexcept {
+            return last_interaction_time_;
+        }
+
     private:
         int fd_;
         bool close_after_reply_;
         std::string query_buffer_;
         std::string reply_buffer_;
         RedisClientContext context_;
+        ExpireTimePoint last_interaction_time_;
     };
 }

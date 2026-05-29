@@ -8,7 +8,8 @@
 #include "hyper/server/resp_codec.hpp"
 #include "hyper/server/resp_value.hpp"
 
-hyper::ClientSession::ClientSession(int fd) : fd_(fd), close_after_reply_(false) {}
+hyper::ClientSession::ClientSession(int fd)
+    : fd_(fd), close_after_reply_(false), last_interaction_time_(ExpireClock::now()) {}
 
 void hyper::ClientSession::appendQueryBytes(std::string_view bytes) {
     query_buffer_.append(bytes);
@@ -25,6 +26,7 @@ void hyper::ClientSession::consumeReplyBytes(std::size_t count) {
 }
 
 void hyper::ClientSession::processInput(RedisServer& server, ExpireTimePoint now) {
+    last_interaction_time_ = now;
     while (!query_buffer_.empty() && !close_after_reply_) {
         auto [status,command,consumed] = parseRespCommand(query_buffer_);
         if (status == RespParseStatus::Incomplete) {

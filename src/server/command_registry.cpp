@@ -7,7 +7,7 @@
 namespace {
     constexpr auto makeRegistry() {
 
-        constexpr std::size_t CommandNumber = 72;
+        constexpr std::size_t CommandNumber = 73;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -15,6 +15,7 @@ namespace {
                 {"DBSIZE", 1, 1, hyper::CommandName::DbSize, false},
                 {"DECR", 2, 2, hyper::CommandName::Decr, true},
                 {"DEL", 2, hyper::UnlimitedArity, hyper::CommandName::Del, true},
+                {"CONFIG", 3, 4, hyper::CommandName::Config, false},
                 {"EXISTS", 2, hyper::UnlimitedArity, hyper::CommandName::Exists, false},
                 {"EXPIRE", 3, 4, hyper::CommandName::Expire, true},
                 {"FLUSHALL", 1, 1, hyper::CommandName::FlushAll, true},

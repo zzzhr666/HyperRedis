@@ -924,7 +924,8 @@ TEST(RedisServerTest, ServerCronRunsActiveExpireCycle) {
     ASSERT_TRUE(db0->expireAfter("db0-key", Milliseconds{10}, now));
     ASSERT_TRUE(db1->expireAfter("db1-key", Milliseconds{10}, now));
 
-    EXPECT_EQ(server.serverCron(now + Milliseconds{10}), 2);
+    EventLoop loop;
+    EXPECT_EQ(server.serverCron(loop, now + Milliseconds{10}), 2);
     EXPECT_EQ(server.dirtyCount(), 2);
     EXPECT_EQ(db0->get("db0-key", now + Milliseconds{10}), nullptr);
     EXPECT_EQ(db1->get("db1-key", now + Milliseconds{10}), nullptr);
@@ -1045,5 +1046,108 @@ TEST(RedisServerTest, InfoCommandReturnsSystemInformation) {
         EXPECT_NE(s.find("# Server"), std::string::npos);
     }
 }
+
+TEST(RedisServerTest, ConfigGetAndSet) {
+    RedisServer server(1);
+    RedisClientContext client;
+    const auto now = makeTime(1000);
+
+    // Test GET defaults
+    {
+        const std::array<std::string_view, 3> cmd{"CONFIG", "GET", "maxclients"};
+        const auto res = server.execute(client, cmd, now);
+        const auto* arr_ptr = std::get_if<std::shared_ptr<RespArray>>(&res);
+        ASSERT_NE(arr_ptr, nullptr);
+        const auto& arr = *arr_ptr;
+        ASSERT_EQ(arr->values.size(), 2);
+        expectBulkString(arr->values[1], "1024");
+    }
+
+    // Test SET and GET
+    {
+        const std::array<std::string_view, 4> set_cmd{"CONFIG", "SET", "maxclients", "2048"};
+        expectSimpleString(server.execute(client, set_cmd, now), "OK");
+        EXPECT_EQ(server.maxClients(), 2048);
+
+        const std::array<std::string_view, 3> get_cmd{"CONFIG", "GET", "maxclients"};
+        const auto res = server.execute(client, get_cmd, now);
+        const auto* arr_ptr = std::get_if<std::shared_ptr<RespArray>>(&res);
+        ASSERT_NE(arr_ptr, nullptr);
+        const auto& arr = *arr_ptr;
+        expectBulkString(arr->values[1], "2048");
+    }
+
+    // Test timeout
+    {
+        const std::array<std::string_view, 4> set_cmd{"CONFIG", "SET", "timeout", "30"};
+        expectSimpleString(server.execute(client, set_cmd, now), "OK");
+        EXPECT_EQ(server.timeout(), 30);
+    }
+
+    // Test read-only parameter
+    {
+        const std::array<std::string_view, 4> set_cmd{"CONFIG", "SET", "databases", "16"};
+        const auto res = server.execute(client, set_cmd, now);
+        const auto* err = std::get_if<RespError>(&res);
+        ASSERT_NE(err, nullptr);
+        EXPECT_NE(err->message.find("Constant"), std::string::npos);
+    }
+}
+
+TEST(RedisServerTest, MaxClientsEnforcement) {
+    RedisServer server(1);
+    server.setMaxClients(1); // Only allow 1 client
+
+    LocalStreamListener listener;
+    ASSERT_TRUE(listener.valid());
+
+    EventLoop loop;
+    ASSERT_TRUE(server.attachListener(loop, listener.fd()));
+
+    LocalStreamClient c1(listener.path());
+    ASSERT_TRUE(c1.valid());
+
+    // Trigger the accept callback in event loop
+    loop.runOnce(std::chrono::milliseconds(10));
+    EXPECT_EQ(server.clientCount(), 1);
+
+    LocalStreamClient c2(listener.path());
+    ASSERT_TRUE(c2.valid());
+
+    // Trigger the accept callback again
+    loop.runOnce(std::chrono::milliseconds(10));
+    // c2 should be rejected, so count stays 1
+    EXPECT_EQ(server.clientCount(), 1);
+
+    // Verify error message on c2
+    char buf[128];
+    ssize_t n = read(c2.fd(), buf, sizeof(buf));
+    ASSERT_GT(n, 0);
+    std::string_view msg(buf, n);
+    EXPECT_NE(msg.find("-ERR max number of clients reached"), std::string::npos);
+}
+
+TEST(RedisServerTest, ClientIdleTimeout) {
+    RedisServer server(1);
+    server.setTimeout(1); // 1 second timeout
+
+    EventLoop loop;
+    SocketPair s1;
+    // attachClient is public
+    ASSERT_TRUE(server.attachClient(loop, s1.serverFd()));
+    EXPECT_EQ(server.clientCount(), 1);
+
+    const auto start = ExpireClock::now();
+
+    // Initially not timed out
+    server.serverCron(loop, start);
+    EXPECT_EQ(server.clientCount(), 1);
+
+    // After 2 seconds, it should be timed out
+    server.serverCron(loop, start + std::chrono::seconds(2));
+    EXPECT_EQ(server.clientCount(), 0);
+}
+
+
 
 

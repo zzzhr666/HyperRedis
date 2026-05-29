@@ -67,3 +67,16 @@ hyper::ClientIoResult hyper::writeClientReply(ClientSession& client) {
     }
     return {ClientIoStatus::Error, 0};
 }
+
+void hyper::sendImmediateErrorAndClose(int fd, std::string_view message) {
+    if (fd < 0) {
+        return;
+    }
+
+    std::string resp_err = "-ERR ";
+    resp_err.append(message);
+    resp_err.append("\r\n");
+    //能写多少写多少，反正该fd注定是会被丢弃的
+    (void)::write(fd, resp_err.data(), resp_err.size());
+    ::close(fd);
+}

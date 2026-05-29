@@ -17,7 +17,6 @@ namespace hyper {
     class RedisServer {
     public:
 
-
         RedisServer(std::size_t db_count, std::unique_ptr<AofAppender> aof_appender,
                     std::unique_ptr<RdbSaver> rdb_saver);
 
@@ -79,25 +78,54 @@ namespace hyper {
             return last_save_time_;
         }
 
-        std::size_t serverCron(ExpireTimePoint now);
+        [[nodiscard]] bool saveRdbOnStop() const noexcept {
+            return save_rdb_on_stop_;
+        }
+
+        void setSaveRdbOnStop(bool enable) noexcept {
+            save_rdb_on_stop_ = enable;
+        }
+
+        [[nodiscard]] std::size_t maxClients() const noexcept {
+            return max_clients_;
+        }
+
+        void setMaxClients(std::size_t max) noexcept {
+            max_clients_ = max;
+        }
+
+        [[nodiscard]] std::uint32_t timeout() const noexcept {
+            return static_cast<std::uint32_t>(timeout_seconds_.count());
+        }
+
+        void setTimeout(std::uint32_t seconds) noexcept {
+            timeout_seconds_ = std::chrono::seconds{seconds};
+        }
+
+        std::size_t serverCron(EventLoop& loop, ExpireTimePoint now);
 
     private:
         void enableClientWritable_(EventLoop& loop, int fd);
 
         bool adoptClient_(EventLoop& loop, int fd);
 
-        std::string generateInfoString(CommandExecutor::Args args);
+        RespValue handleConfig_(CommandExecutor::Args args);
+
+        std::string generateInfoString_(CommandExecutor::Args args);
 
     private:
         RedisManager manager_;
         std::unique_ptr<AofAppender> aof_appender_;
         std::unique_ptr<RdbSaver> rdb_saver_;
         CommandProcessor processor_;
-        std::size_t dirty_count_;
         std::unordered_map<int, ClientSession> client_sessions_;
         std::unordered_set<int> owned_client_fds_;
         ExpireTimePoint last_save_time_;
+        bool save_rdb_on_stop_;
+        std::size_t dirty_count_;
         std::size_t total_commands_;
+        std::size_t max_clients_;
         ExpireTimePoint start_time_;
-    };
-}
+        std::chrono::seconds timeout_seconds_{0};
+        };
+        }

@@ -25,4 +25,6 @@ namespace hyper {
                                                  ExpireTimePoint now);
 
     [[nodiscard]] ClientIoResult writeClientReply(ClientSession& client);
+
+    void sendImmediateErrorAndClose(int fd, std::string_view message);
 }

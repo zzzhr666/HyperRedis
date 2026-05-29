@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <utility>
+#include <spdlog/spdlog.h>
 #include <sys/socket.h>
 
 #include "hyper/server/client_socket_io.hpp"
@@ -13,10 +14,12 @@
 #include "hyper/storage/rdb_saver.hpp"
 #include "hyper/time.hpp"
 #include "hyper/version.hpp"
+#include "hyper/server/server_options.hpp"
 #include "hyper/storage/aof_replayer.hpp"
 
 namespace {
     constexpr std::size_t CheckKeysNumber = 20;
+    constexpr std::size_t DefaultMaxClients = 1024;
 }
 
 namespace {
@@ -32,8 +35,8 @@ namespace {
 hyper::RedisServer::RedisServer(std::size_t db_count, std::unique_ptr<AofAppender> aof_appender,
                                 std::unique_ptr<RdbSaver> rdb_saver)
     : manager_(db_count), aof_appender_(std::move(aof_appender)), rdb_saver_(std::move(rdb_saver)),
-      processor_(aof_appender_.get()), dirty_count_(0), last_save_time_(ExpireClock::now()),
-      total_commands_(0), start_time_(ExpireClock::now()) {}
+      processor_(aof_appender_.get()), last_save_time_(ExpireClock::now()), save_rdb_on_stop_(false),
+      dirty_count_(0), total_commands_(0), max_clients_(DefaultMaxClients), start_time_(ExpireClock::now()) {}
 
 hyper::RedisServer::RedisServer(std::size_t db_count)
     : RedisServer(db_count, nullptr, nullptr) {}
@@ -89,8 +92,12 @@ hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, Command
     }
 
     if (res && res->command_name == CommandName::Info && !std::holds_alternative<RespError>(execute_res)) {
-        std::string info_string = generateInfoString(args);
+        std::string info_string = generateInfoString_(args);
         return respBulk(std::move(info_string));
+    }
+
+    if (res && res->command_name == CommandName::Config) {
+        return handleConfig_(args);
     }
 
     return execute_res;
@@ -218,8 +225,21 @@ bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
     return false;
 }
 
-std::size_t hyper::RedisServer::serverCron(ExpireTimePoint now) {
+std::size_t hyper::RedisServer::serverCron(EventLoop& loop, ExpireTimePoint now) {
     std::size_t done = activeExpireCycle(now, CheckKeysNumber);
+
+    if (timeout_seconds_.count() > 0) {
+        std::vector<int>fds;
+        for (const auto&[fd,session] : client_sessions_) {
+            if (now - session.lastInteractionTime() > timeout_seconds_) {
+                fds.emplace_back(fd);
+            }
+        }
+        for (int fd : fds) {
+            detachClient(loop,fd);
+            SPDLOG_INFO("Closing idle connection:fd={}",fd);
+        }
+    }
     if (aof_appender_) {
         aof_appender_->flushIfNeeded(now);
     }
@@ -248,6 +268,10 @@ void hyper::RedisServer::enableClientWritable_(EventLoop& loop, int fd) {
 }
 
 bool hyper::RedisServer::adoptClient_(EventLoop& loop, int fd) {
+    if (clientCount() >= max_clients_) {
+        sendImmediateErrorAndClose(fd, "max number of clients reached");
+        return false;
+    }
     if (attachClient(loop, fd)) {
         owned_client_fds_.insert(fd);
         return true;
@@ -256,7 +280,124 @@ bool hyper::RedisServer::adoptClient_(EventLoop& loop, int fd) {
     return false;
 }
 
-std::string hyper::RedisServer::generateInfoString(CommandExecutor::Args args) {
+hyper::RespValue hyper::RedisServer::handleConfig_(CommandExecutor::Args args) {
+    std::string command(args[1]);
+    std::ranges::transform(command, command.begin(), [](unsigned char c) {
+        return std::toupper(c);
+    });
+
+    if (command == "GET") {
+        if (args.size() < 3) {
+            return respError("ERR wrong number of arguments for CONFIG GET");
+        }
+        std::string key(args[2]);
+        std::ranges::transform(key, key.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+
+        auto ret = std::make_shared<RespArray>();
+        if (key == "appendfsync") {
+            if (hasAofAppender()) {
+                ret->values.emplace_back(respBulk(key));
+                ret->values.emplace_back(respBulk(policyToString(aof_appender_->fsyncPolicy())));
+            }
+        } else if (key == "databases") {
+            ret->values.emplace_back(respBulk(key));
+            ret->values.emplace_back(respBulk(std::to_string(manager_.dbCount())));
+        } else if (key == "save-rdb-on-stop") {
+            ret->values.emplace_back(respBulk(key));
+            ret->values.emplace_back(respBulk(save_rdb_on_stop_ ? "yes" : "no"));
+        } else if (key == "aof-path") {
+            if (hasAofAppender()) {
+                ret->values.emplace_back(respBulk(key));
+                ret->values.emplace_back(respBulk(aof_appender_->path().string()));
+            }
+        } else if (key == "rdb-path") {
+            if (hasRdbSaver()) {
+                ret->values.emplace_back(respBulk(key));
+                ret->values.emplace_back(respBulk(rdb_saver_->path().string()));
+            }
+        } else if (key == "maxclients") {
+            ret->values.emplace_back(respBulk(key));
+            ret->values.emplace_back(respBulk(std::to_string(max_clients_)));
+        } else if (key == "timeout") {
+            ret->values.emplace_back(respBulk(key));
+            ret->values.emplace_back(respBulk(std::to_string(timeout_seconds_.count())));
+        }
+        return ret;
+    }
+
+    if (command == "SET") {
+        if (args.size() != 4) {
+            return respError("ERR wrong number of arguments for CONFIG SET");
+        }
+        std::string key(args[2]);
+        std::ranges::transform(key, key.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+
+        if (key == "appendfsync") {
+            AofFsyncPolicy policy;
+            if (!parseAofFsyncPolicy(args[3], policy)) {
+                return respError(std::string(ErrSyntaxError));
+            }
+            if (hasAofAppender()) {
+                aof_appender_->setFsyncPolicy(policy);
+                return respOk();
+            }
+            return respError("ERR AOF is not enabled");
+        }
+
+        if (key == "save-rdb-on-stop") {
+            std::string val(args[3]);
+            std::ranges::transform(val, val.begin(), [](unsigned char c) {
+                return std::tolower(c);
+            });
+            if (val == "yes") {
+                save_rdb_on_stop_ = true;
+                return respOk();
+            } else if (val == "no") {
+                save_rdb_on_stop_ = false;
+                return respOk();
+            }
+            return respError(std::string(ErrSyntaxError));
+        }
+
+        if (key == "maxclients") {
+            std::size_t max_size;
+            auto& size_str = args[3];
+            const auto* first = size_str.data();
+            const auto* last = first + size_str.size();
+            auto [ptr, ec] = std::from_chars(first, last, max_size);
+            if (ptr == last && ec == std::errc()) {
+                setMaxClients(max_size);
+                return respOk();
+            }
+            return respError(std::string(ErrInvalidInteger));
+        }
+
+        if (key == "timeout") {
+            std::uint32_t seconds;
+            auto& sec_str = args[3];
+            const auto* first = sec_str.data();
+            const auto* last = first + sec_str.size();
+            auto [ptr, ec] = std::from_chars(first, last, seconds);
+            if (ptr == last && ec == std::errc()) {
+                setTimeout(seconds);
+                return respOk();
+            }
+            return respError(std::string(ErrInvalidInteger));
+        }
+
+        if (key == "databases" || key == "aof-path" || key == "rdb-path") {
+            return respError("ERR Constant configuration parameter cannot be modified");
+        }
+    }
+
+    return respError(std::string(ErrSyntaxError));
+}
+
+std::string hyper::RedisServer::generateInfoString_(CommandExecutor::Args args) {
     std::string section = "all";
     if (args.size() > 1) {
         section = args[1];

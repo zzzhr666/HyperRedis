@@ -77,7 +77,8 @@ namespace hyper {
         LastSave,
         Info,
         Object,
-        Time
+        Time,
+        Config
     };
 
     struct CommandSpec {
