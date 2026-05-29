@@ -488,15 +488,17 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - [ ] 启动失败返回更具体 errno 信息
 - [x] 设计 serverCron/time event，周期执行主动过期和 AOF everysec fsync
 
-### 持久化接入
+### 持久化演进
 
-- [x] 服务端启动时按配置加载 RDB/AOF
-- [x] 服务端关闭时按配置同步保存 RDB-like 快照
-- [x] 将 AOF append 接入真实 TCP 写命令路径
-- [x] AOF 启动恢复后同步后续 append 的 DB 选择状态
-- [x] 在 serverCron 中调度 AOF everysec fsync
-- [x] 增加同步 `SAVE` 命令入口
-- [ ] 设计 `BGSAVE` / `BGWRITEAOF` 的后台任务状态模型
+- [ ] 实现同步 `REWRITEAOF` 命令：验证 `AofRewriter` 逻辑，并实现原子文件替换与 `AofAppender` 句柄重载
+- [ ] 实现后台 RDB 保存（`BGSAVE`）：
+    - 引入 `fork()` 子进程机制与 Copy-on-Write (COW) 内存模型
+    - 在 `serverCron` 中非阻塞收割（`waitpid`）子进程状态
+    - 增加后台任务状态机，防止多个持久化任务冲突
+- [ ] 实现后台 AOF 重写（`BGREWRITEAOF`）：
+    - 实现 **AOF Rewrite Buffer**：在重写期间暂存主进程产生的增量写命令
+    - 实现重写后期的数据追赶与最终合并逻辑
+- [ ] 完善 `SAVE` 策略：支持 `CONFIG SET save "900 1 300 10"` 等自动触发规则
 
 ### 兼容性与性能
 
