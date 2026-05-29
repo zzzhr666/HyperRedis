@@ -5,6 +5,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <spdlog/spdlog.h>
 
 
 #include "hyper/server/client_context.hpp"

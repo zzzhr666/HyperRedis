@@ -71,9 +71,8 @@ TEST(AofRewriterTest, RewriteEmptyManagerCreatesEmptyAof) {
     std::filesystem::remove(path);
 
     RedisManager source(2);
-    AofRewriter rewriter(path);
 
-    ASSERT_TRUE(rewriter.rewrite(source, makeTime(1'000)));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, makeTime(1'000)));
     ASSERT_TRUE(std::filesystem::is_regular_file(path));
     EXPECT_TRUE(readFile(path).empty());
 
@@ -90,8 +89,7 @@ TEST(AofRewriterTest, RewriteStringKeysCanBeReplayed) {
     source.db(0)->set("plain", RedisObject::createSharedStringObject("value"));
     source.db(0)->set("integer", RedisObject::createSharedLongObject(42));
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
@@ -114,8 +112,7 @@ TEST(AofRewriterTest, RewritePreservesSelectedDatabases) {
     source.db(0)->set("key", RedisObject::createSharedStringObject("db0"));
     source.db(2)->set("key", RedisObject::createSharedStringObject("db2"));
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(3);
     ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
@@ -141,8 +138,7 @@ TEST(AofRewriterTest, RewriteSkipsExpiredKeys) {
     source.db(0)->set("live", RedisObject::createSharedStringObject("new"));
     ASSERT_TRUE(source.db(0)->expireAfter("expired", Milliseconds{5}, now));
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now + Milliseconds{5}));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now + Milliseconds{5}));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, now + Milliseconds{5}).ok);
@@ -167,8 +163,7 @@ TEST(AofRewriterTest, RewriteListKeysCanBeReplayedInOrder) {
     list->listRightPush(RedisObject::createSharedStringObject("third"));
     source.db(0)->set("items", list);
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
@@ -191,8 +186,7 @@ TEST(AofRewriterTest, RewriteHashKeysCanBeReplayed) {
     EXPECT_TRUE(hash->hashSet("age", RedisObject::createSharedLongObject(20)));
     source.db(0)->set("user", hash);
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
@@ -220,8 +214,7 @@ TEST(AofRewriterTest, RewriteSetKeysCanBeReplayed) {
     EXPECT_TRUE(set->setAdd("beta"));
     source.db(0)->set("tags", set);
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
@@ -245,8 +238,7 @@ TEST(AofRewriterTest, RewriteZSetKeysCanBeReplayed) {
     EXPECT_TRUE(zset->zSetAdd("carol", 10.5));
     source.db(0)->set("leaders", zset);
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, now).ok);
@@ -282,8 +274,7 @@ TEST(AofRewriterTest, RewritePreservesRemainingTtl) {
     ASSERT_TRUE(source.db(0)->expireAfter("volatile", Milliseconds{2'500}, now));
     ASSERT_TRUE(source.db(2)->expireAfter("volatile", Milliseconds{1'500}, now));
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, rewrite_now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, rewrite_now));
 
     RedisManager target(3);
     ASSERT_TRUE(AofReplayer::replay(path, target, rewrite_now).ok);
@@ -311,8 +302,7 @@ TEST(AofRewriterTest, RewriteUsesAbsoluteExpireTimeWhenReplayIsDelayed) {
     source.db(0)->set("soon", RedisObject::createSharedStringObject("value"));
     ASSERT_TRUE(source.db(0)->expireAfter("soon", Milliseconds{1'000}, now));
 
-    AofRewriter rewriter(path);
-    ASSERT_TRUE(rewriter.rewrite(source, now));
+    ASSERT_TRUE(AofRewriter::rewrite(path, source, now));
 
     RedisManager target(1);
     ASSERT_TRUE(AofReplayer::replay(path, target, replay_now).ok);

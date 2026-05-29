@@ -113,6 +113,8 @@ namespace hyper {
 
         std::string generateInfoString_(CommandExecutor::Args args);
 
+        RespValue rewriteAof_(ExpireTimePoint now);
+
     private:
         RedisManager manager_;
         std::unique_ptr<AofAppender> aof_appender_;

@@ -181,3 +181,34 @@ TEST(AofAppenderTest, AppendCommandFailureLeavesAppenderBroken) {
     EXPECT_FALSE(appender.appendCommand(0, args, now));
     EXPECT_FALSE(std::filesystem::exists(path));
 }
+
+TEST(AofAppenderTest, ReloadForcesSelectAndClosesOldFd) {
+    const auto path = testPath("hyperredis-aof-appender-reload.aof");
+    std::filesystem::remove(path);
+
+    {
+        AofAppender appender(path);
+        const std::array<std::string_view, 3> args{"SET", "key", "value"};
+        const auto now = makeTime(1'000);
+
+        // 1. 正常写入 DB 0
+        ASSERT_TRUE(appender.appendCommand(0, args, now));
+
+        // 2. 模拟重写：外部清空文件（模拟 rename 后的新环境）
+        {
+            std::ofstream truncator(path, std::ios::trunc);
+        }
+
+        // 3. 重载 Appender
+        appender.reload();
+
+        // 4. 再次向 DB 0 写入
+        ASSERT_TRUE(appender.appendCommand(0, args, now));
+
+        // 5. 验证：由于 reload 强制失效了 DB 状态，即便还是 DB 0，也必须生成 SELECT 0
+        const std::array<std::string_view, 2> select_args{"SELECT", "0"};
+        EXPECT_EQ(readFile(path), serializeRespCommand(select_args) + serializeRespCommand(args));
+    }
+
+    std::filesystem::remove(path);
+}

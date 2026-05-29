@@ -78,7 +78,8 @@ namespace hyper {
         Info,
         Object,
         Time,
-        Config
+        Config,
+        RewriteAof
     };
 
     struct CommandSpec {

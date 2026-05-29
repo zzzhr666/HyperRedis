@@ -36,13 +36,8 @@ namespace {
         }
     }
 }
-
-hyper::AofRewriter::AofRewriter(std::filesystem::path path)
-    : path_(std::move(path)) {
-}
-
-bool hyper::AofRewriter::rewrite(RedisManager& manager, ExpireTimePoint now) const {
-    std::ofstream out(path_, std::ios::binary | std::ios::trunc);
+bool hyper::AofRewriter::rewrite(const std::filesystem::path& path,RedisManager& manager, ExpireTimePoint now) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
         return false;
     }
@@ -147,3 +142,5 @@ bool hyper::AofRewriter::rewrite(RedisManager& manager, ExpireTimePoint now) con
     out.close();
     return ok && out.good();
 }
+
+

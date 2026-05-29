@@ -7,7 +7,7 @@
 namespace {
     constexpr auto makeRegistry() {
 
-        constexpr std::size_t CommandNumber = 73;
+        constexpr std::size_t CommandNumber = 74;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -83,7 +83,8 @@ namespace {
                 {"LASTSAVE", 1, 1, hyper::CommandName::LastSave, false},
                 {"INFO", 1, 2, hyper::CommandName::Info, false},
                 {"OBJECT", 3, 3, hyper::CommandName::Object, false},
-                {"TIME", 1, 1, hyper::CommandName::Time, false}
+                {"TIME", 1, 1, hyper::CommandName::Time, false},
+                {"REWRITEAOF", 1, 1, hyper::CommandName::RewriteAof, false}
             }
         };
         std::ranges::sort(registry, {}, &hyper::CommandSpec::name);

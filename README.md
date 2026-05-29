@@ -490,7 +490,7 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 
 ### 持久化演进
 
-- [ ] 实现同步 `REWRITEAOF` 命令：验证 `AofRewriter` 逻辑，并实现原子文件替换与 `AofAppender` 句柄重载
+- [x] 实现同步 `REWRITEAOF` 命令：验证 `AofRewriter` 逻辑，并实现原子文件替换与 `AofAppender` 句柄重载
 - [ ] 实现后台 RDB 保存（`BGSAVE`）：
     - 引入 `fork()` 子进程机制与 Copy-on-Write (COW) 内存模型
     - 在 `serverCron` 中非阻塞收割（`waitpid`）子进程状态

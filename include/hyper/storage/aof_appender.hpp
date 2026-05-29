@@ -57,6 +57,8 @@ namespace hyper {
 
         bool flushIfNeeded(ExpireTimePoint now);
 
+        void reload();
+
     private:
         [[nodiscard]] bool syncIfDue_(ExpireTimePoint now);
 

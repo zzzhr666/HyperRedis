@@ -16,6 +16,7 @@
 #include "hyper/version.hpp"
 #include "hyper/server/server_options.hpp"
 #include "hyper/storage/aof_replayer.hpp"
+#include "hyper/storage/aof_rewriter.hpp"
 
 namespace {
     constexpr std::size_t CheckKeysNumber = 20;
@@ -98,6 +99,10 @@ hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, Command
 
     if (res && res->command_name == CommandName::Config) {
         return handleConfig_(args);
+    }
+
+    if (res && res->command_name == CommandName::RewriteAof && !std::holds_alternative<RespError>(execute_res)) {
+        return rewriteAof_(now);
     }
 
     return execute_res;
@@ -201,6 +206,7 @@ void hyper::RedisServer::detachListener(EventLoop& loop, int listen_fd) {
 
 bool hyper::RedisServer::loadRdb(ExpireTimePoint now) {
     if (hasRdbSaver()) {
+        SPDLOG_INFO("Loading RDB from {}", rdb_saver_->path().string());
         return rdb_saver_->load(manager_, now);
     }
     return false;
@@ -208,6 +214,7 @@ bool hyper::RedisServer::loadRdb(ExpireTimePoint now) {
 
 bool hyper::RedisServer::saveRdb(ExpireTimePoint now) {
     if (hasRdbSaver()) {
+        SPDLOG_INFO("Saving RDB to {}", rdb_saver_->path().string());
         return rdb_saver_->save(manager_, now);
     }
     return false;
@@ -215,11 +222,14 @@ bool hyper::RedisServer::saveRdb(ExpireTimePoint now) {
 
 bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
     if (hasAofAppender()) {
+        SPDLOG_INFO("Loading AOF from {}", aof_appender_->path().string());
         auto [replay_success,current_db_index] = AofReplayer::replay(aof_appender_->path(), manager_, now);
         if (!replay_success) {
+            SPDLOG_ERROR("AOF replay failed for {}", aof_appender_->path().string());
             return false;
         }
         aof_appender_->setSelectedDbIndex(current_db_index);
+        SPDLOG_INFO("AOF replay successful, selected DB index: {}", current_db_index);
         return true;
     }
     return false;
@@ -229,15 +239,15 @@ std::size_t hyper::RedisServer::serverCron(EventLoop& loop, ExpireTimePoint now)
     std::size_t done = activeExpireCycle(now, CheckKeysNumber);
 
     if (timeout_seconds_.count() > 0) {
-        std::vector<int>fds;
-        for (const auto&[fd,session] : client_sessions_) {
+        std::vector<int> fds;
+        for (const auto& [fd,session] : client_sessions_) {
             if (now - session.lastInteractionTime() > timeout_seconds_) {
                 fds.emplace_back(fd);
             }
         }
         for (int fd : fds) {
-            detachClient(loop,fd);
-            SPDLOG_INFO("Closing idle connection:fd={}",fd);
+            detachClient(loop, fd);
+            SPDLOG_INFO("Closing idle connection:fd={}", fd);
         }
     }
     if (aof_appender_) {
@@ -457,4 +467,33 @@ std::string hyper::RedisServer::generateInfoString_(CommandExecutor::Args args) 
     }
 
     return res;
+}
+
+hyper::RespValue hyper::RedisServer::rewriteAof_(ExpireTimePoint now) {
+    if (!hasAofAppender()) {
+        return respError("ERR AOF is not enabled");
+    }
+
+    auto target_path = aof_appender_->path();
+    std::filesystem::path tmp_path(target_path.string() + ".tmp");
+
+    SPDLOG_INFO("AOF Rewrite: target={}, tmp={}", target_path.string(), tmp_path.string());
+
+    if (!AofRewriter::rewrite(tmp_path, manager_, now)) {
+        std::filesystem::remove(tmp_path);
+        SPDLOG_ERROR("AOF Rewrite: serialization failed");
+        return respError("ERR AOF rewrite failed during serialization");
+    }
+
+    std::error_code ec;
+    std::filesystem::rename(tmp_path, target_path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp_path);
+        SPDLOG_ERROR("AOF Rewrite: rename failed: {}", ec.message());
+        return respError("ERR AOF rewrite rename failed: " + ec.message());
+    }
+
+    aof_appender_->reload();
+    SPDLOG_INFO("AOF Rewrite: completed successfully");
+    return respOk();
 }

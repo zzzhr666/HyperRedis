@@ -260,11 +260,11 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
     case CommandName::ZRemRangeByScore:
         return zRemRangeByScore_(manager, client, args, now);
     case CommandName::Save:
-        return save_();
     case CommandName::LastSave:
-        return lastSave_();
     case CommandName::Info:
-        return info_();
+    case CommandName::Config:
+    case CommandName::RewriteAof:
+        return respOk();
     case CommandName::Object:
         return object_(manager, client, args, now);
     case CommandName::Time:
@@ -470,21 +470,9 @@ hyper::RespValue hyper::CommandExecutor::renameNx_(RedisManager& manager, RedisC
     return respInteger(1);
 }
 
-hyper::RespValue hyper::CommandExecutor::save_() const {
-    return respOk();
-}
-
-hyper::RespValue hyper::CommandExecutor::lastSave_() const {
-    return respInteger(0);
-}
-
-hyper::RespValue hyper::CommandExecutor::info_() const {
-    return respBulk("");
-}
-
 hyper::RespValue hyper::CommandExecutor::object_(RedisManager& manager, RedisClientContext& client, Args args,
                                                  ExpireTimePoint now) const {
-    // TODO: Implement OBJECT ENCODING <key> and OBJECT REFCOUNT <key>
+
     std::string sub_command(args[1]);
     std::ranges::transform(sub_command, sub_command.begin(), [](unsigned char c) {
         return std::toupper(c);

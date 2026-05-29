@@ -4,9 +4,11 @@
 #include <cassert>
 #include <cerrno>
 #include <fcntl.h>
+#include <limits>
+#include <optional>
 #include <string_view>
 #include <unistd.h>
-#include <optional>
+#include <spdlog/spdlog.h>
 
 #include "hyper/server/resp_codec.hpp"
 
@@ -90,6 +92,13 @@ bool hyper::AofAppender::flushIfNeeded(ExpireTimePoint now) {
         return false;
     }
     return true;
+}
+
+void hyper::AofAppender::reload() {
+    closeFd_();
+    broken_ = false;
+    fsync_pending_ = false;
+    selected_db_index_ = std::numeric_limits<std::size_t>::max();
 }
 
 bool hyper::AofAppender::syncIfDue_(ExpireTimePoint now) {
