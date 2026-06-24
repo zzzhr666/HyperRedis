@@ -269,7 +269,10 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
         return object_(manager, client, args, now);
     case CommandName::Time:
         return time_();
+    case CommandName::Command:
+        return command_();
     }
+
     return commandError(ErrUnknownCommand);
 }
 
@@ -282,6 +285,41 @@ hyper::RespValue hyper::CommandExecutor::ping_(Args args) const {
         return respPong();
     }
     return respBulk(std::string(args[1]));
+}
+
+hyper::RespValue hyper::CommandExecutor::command_() const {
+    auto commands = getAllCommands();
+    auto resp_arr = std::make_shared<RespArray>();
+
+    resp_arr->values.reserve(commands.size());
+    for (const auto& spec : commands) {
+        auto single_cmd = std::make_shared<RespArray>();
+        single_cmd->values.push_back(respBulk(std::string(spec.name)));
+
+        std::int64_t redis_arity;
+        if (spec.min_arity == spec.max_arity) {
+            redis_arity = static_cast<std::int64_t>(spec.min_arity);
+        } else {
+            redis_arity = -static_cast<std::int64_t>(spec.min_arity);
+        }
+        single_cmd->values.push_back(respInteger(redis_arity));
+
+        auto flags = std::make_shared<RespArray>();
+        if (spec.write) {
+            flags->values.push_back(RespSimpleString("write"));
+        } else {
+            flags->values.push_back(RespSimpleString("readonly"));
+        }
+        single_cmd->values.push_back(flags);
+
+        //简化实现，全部填1
+        single_cmd->values.push_back(respInteger(1));
+        single_cmd->values.push_back(respInteger(1));
+        single_cmd->values.push_back(respInteger(1));
+        resp_arr->values.push_back(single_cmd);
+    }
+
+    return resp_arr;
 }
 
 hyper::RespValue hyper::CommandExecutor::select_(RedisManager& manager, RedisClientContext& client, Args args) const {
@@ -472,7 +510,6 @@ hyper::RespValue hyper::CommandExecutor::renameNx_(RedisManager& manager, RedisC
 
 hyper::RespValue hyper::CommandExecutor::object_(RedisManager& manager, RedisClientContext& client, Args args,
                                                  ExpireTimePoint now) const {
-
     std::string sub_command(args[1]);
     std::ranges::transform(sub_command, sub_command.begin(), [](unsigned char c) {
         return std::toupper(c);

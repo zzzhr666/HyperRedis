@@ -7,7 +7,7 @@
 namespace {
     constexpr auto makeRegistry() {
 
-        constexpr std::size_t CommandNumber = 74;
+        constexpr std::size_t CommandNumber = 76;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -84,7 +84,10 @@ namespace {
                 {"INFO", 1, 2, hyper::CommandName::Info, false},
                 {"OBJECT", 3, 3, hyper::CommandName::Object, false},
                 {"TIME", 1, 1, hyper::CommandName::Time, false},
-                {"REWRITEAOF", 1, 1, hyper::CommandName::RewriteAof, false}
+                {"REWRITEAOF", 1, 1, hyper::CommandName::RewriteAof, false},
+                {"COMMAND",1,hyper::UnlimitedArity,hyper::CommandName::Command,false},
+                {"HRZHANG",1,1,hyper::CommandName::Ping,false}
+
             }
         };
         std::ranges::sort(registry, {}, &hyper::CommandSpec::name);
@@ -112,4 +115,8 @@ const hyper::CommandSpec* hyper::findCommand(std::string_view upper_case_command
         return nullptr;
     }
     return &*it;
+}
+
+std::span<const hyper::CommandSpec> hyper::getAllCommands() {
+    return {registry.begin(),registry.end()};
 }

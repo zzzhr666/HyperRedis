@@ -1,19 +1,19 @@
 #include "hyper/server/tcp_listener.hpp"
-
+#include <cerrno>
+#include <cstring>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-std::optional<hyper::TcpListener> hyper::TcpListener::create(const TcpListenOptions& option) {
+std::variant<hyper::TcpListener,std::string> hyper::TcpListener::create(const TcpListenOptions& option) {
     if (option.host != "127.0.0.1") {
-        return std::nullopt;
+        return "wrong host ip";
     }
 
     auto fd = ::socket(AF_INET,SOCK_STREAM, 0);
     if (fd < 0) {
-        return std::nullopt;
+        return "socket error:" + std::string( std::strerror(errno));
     }
-
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -23,23 +23,23 @@ std::optional<hyper::TcpListener> hyper::TcpListener::create(const TcpListenOpti
     int reuse = 1;
     if (::setsockopt(fd,SOL_SOCKET,SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
         ::close(fd);
-        return std::nullopt;
+        return "setsockopt error:" + std::string(std::strerror(errno));
     }
 
     if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
         ::close(fd);
-        return std::nullopt;
+        return "bind error:" + std::string(std::strerror(errno));
     }
     if (::listen(fd, option.backlog) != 0) {
         ::close(fd);
-        return std::nullopt;
+        return "listen error:" + std::string(std::strerror(errno));
     }
     sockaddr_in bound_addr{};
     socklen_t bound_len = sizeof(bound_addr);
 
     if (::getsockname(fd, reinterpret_cast<sockaddr*>(&bound_addr), &bound_len) != 0) {
         ::close(fd);
-        return std::nullopt;
+        return "getsockname error:" + std::string(std::strerror(errno));
     }
     auto actual_port = ntohs(bound_addr.sin_port);
     return TcpListener{fd, actual_port};

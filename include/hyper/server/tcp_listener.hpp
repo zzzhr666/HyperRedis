@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
-#include <optional>
 #include <string>
+#include <variant>
 #include <sys/socket.h>
 
 namespace hyper {
@@ -13,14 +13,16 @@ namespace hyper {
 
     class TcpListener {
     public:
-        static std::optional<TcpListener> create(const TcpListenOptions& option);
+        static std::variant<TcpListener,std::string> create(const TcpListenOptions& option);
 
         [[nodiscard]] int fd() const noexcept {
             return fd_;
         }
+
         [[nodiscard]] std::uint16_t port() const noexcept {
             return port_;
         }
+
         TcpListener(const TcpListener&) = delete;
         TcpListener& operator=(const TcpListener&) = delete;
 

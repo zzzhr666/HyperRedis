@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <limits>
 #include <string_view>
+#include <span>
 
 namespace hyper {
     enum class CommandName : std::uint8_t {
@@ -79,7 +80,8 @@ namespace hyper {
         Object,
         Time,
         Config,
-        RewriteAof
+        RewriteAof,
+        Command
     };
 
     struct CommandSpec {
@@ -94,4 +96,5 @@ namespace hyper {
     constexpr std::size_t UnlimitedArity = std::numeric_limits<std::size_t>::max();
 
     [[nodiscard]] const CommandSpec* findCommand(std::string_view upper_case_command);
+    [[nodiscard]] std::span<const CommandSpec>getAllCommands();
 }

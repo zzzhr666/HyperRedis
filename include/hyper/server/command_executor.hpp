@@ -35,6 +35,8 @@ namespace hyper {
         // --- Generic / Database / Connection ---
         [[nodiscard]] RespValue ping_(Args args) const;
 
+        [[nodiscard]] RespValue command_() const;
+
         [[nodiscard]] RespValue select_(RedisManager& manager, RedisClientContext& client, Args args) const;
 
         [[nodiscard]] RespValue dbSize_(RedisManager& manager, RedisClientContext& client, ExpireTimePoint now) const;

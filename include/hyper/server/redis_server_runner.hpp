@@ -30,12 +30,19 @@ namespace hyper {
         RedisServerPersistenceConfig persistence;
     };
 
+    struct StartResult {
+        bool success;
+        std::string error;
+
+        explicit operator bool() const noexcept { return success; }
+    };
+
     class RedisServerRunner {
     public:
         RedisServerRunner();
         ~RedisServerRunner();
 
-        bool start(const RedisServerRunnerConfig& config);
+        StartResult start(const RedisServerRunnerConfig& config);
         void runOnce(std::chrono::milliseconds timeout);
 
         void stop();

@@ -84,25 +84,27 @@ TEST(TcpListenerTest, CreateWithPortZeroBindsToAssignedPort) {
         GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
 
-    auto listener = TcpListener::create(portZeroOptions());
+    auto listener_res = TcpListener::create(portZeroOptions());
 
-    ASSERT_TRUE(listener.has_value());
-    EXPECT_GE(listener->fd(), 0);
-    EXPECT_NE(listener->port(), 0);
-    EXPECT_NE(::fcntl(listener->fd(), F_GETFD), -1);
+    ASSERT_TRUE(std::holds_alternative<TcpListener>(listener_res));
+    auto& listener = std::get<TcpListener>(listener_res);
+    EXPECT_GE(listener.fd(), 0);
+    EXPECT_NE(listener.port(), 0);
+    EXPECT_NE(::fcntl(listener.fd(), F_GETFD), -1);
 }
 
 TEST(TcpListenerTest, CreatedListenerAcceptsTcpClient) {
     if (skipTcpListenerTests()) {
         GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
-    auto listener = TcpListener::create(portZeroOptions());
-    ASSERT_TRUE(listener.has_value());
+    auto listener_res = TcpListener::create(portZeroOptions());
+    ASSERT_TRUE(std::holds_alternative<TcpListener>(listener_res));
+    auto& listener = std::get<TcpListener>(listener_res);
 
-    TcpClient client(listener->port());
+    TcpClient client(listener.port());
     ASSERT_TRUE(client.valid()) << "connect failed with errno " << client.errorNumber();
 
-    const int accepted_fd = ::accept(listener->fd(), nullptr, nullptr);
+    const int accepted_fd = ::accept(listener.fd(), nullptr, nullptr);
     ASSERT_GE(accepted_fd, 0);
     ::close(accepted_fd);
 }
@@ -111,15 +113,16 @@ TEST(TcpListenerTest, MoveConstructorTransfersFdOwnership) {
     if (skipTcpListenerTests()) {
         GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
-    auto listener = TcpListener::create(portZeroOptions());
-    ASSERT_TRUE(listener.has_value());
-    const int original_fd = listener->fd();
-    const auto original_port = listener->port();
+    auto listener_res = TcpListener::create(portZeroOptions());
+    ASSERT_TRUE(std::holds_alternative<TcpListener>(listener_res));
+    auto& listener = std::get<TcpListener>(listener_res);
+    const int original_fd = listener.fd();
+    const auto original_port = listener.port();
 
-    TcpListener moved(std::move(*listener));
+    TcpListener moved(std::move(listener));
 
-    EXPECT_EQ(listener->fd(), -1);
-    EXPECT_EQ(listener->port(), 0);
+    EXPECT_EQ(listener.fd(), -1);
+    EXPECT_EQ(listener.port(), 0);
     EXPECT_EQ(moved.fd(), original_fd);
     EXPECT_EQ(moved.port(), original_port);
     EXPECT_NE(::fcntl(moved.fd(), F_GETFD), -1);
@@ -129,20 +132,22 @@ TEST(TcpListenerTest, MoveAssignmentClosesPreviousFdAndTransfersOwnership) {
     if (skipTcpListenerTests()) {
         GTEST_SKIP() << "HYPERREDIS_SKIP_TCP_LISTENER_TESTS=1";
     }
-    auto first = TcpListener::create(portZeroOptions());
-    auto second = TcpListener::create(portZeroOptions());
-    ASSERT_TRUE(first.has_value());
-    ASSERT_TRUE(second.has_value());
-    const int closed_fd = first->fd();
-    const int transferred_fd = second->fd();
-    const auto transferred_port = second->port();
+    auto first_res = TcpListener::create(portZeroOptions());
+    auto second_res = TcpListener::create(portZeroOptions());
+    ASSERT_TRUE(std::holds_alternative<TcpListener>(first_res));
+    ASSERT_TRUE(std::holds_alternative<TcpListener>(second_res));
+    auto& first = std::get<TcpListener>(first_res);
+    auto& second = std::get<TcpListener>(second_res);
+    const int closed_fd = first.fd();
+    const int transferred_fd = second.fd();
+    const auto transferred_port = second.port();
 
-    *first = std::move(*second);
+    first = std::move(second);
 
-    EXPECT_EQ(second->fd(), -1);
-    EXPECT_EQ(second->port(), 0);
-    EXPECT_EQ(first->fd(), transferred_fd);
-    EXPECT_EQ(first->port(), transferred_port);
+    EXPECT_EQ(second.fd(), -1);
+    EXPECT_EQ(second.port(), 0);
+    EXPECT_EQ(first.fd(), transferred_fd);
+    EXPECT_EQ(first.port(), transferred_port);
 
     errno = 0;
     EXPECT_EQ(::fcntl(closed_fd, F_GETFD), -1);

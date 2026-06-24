@@ -12,17 +12,17 @@ hyper::RedisServerRunner::RedisServerRunner()
 
 hyper::RedisServerRunner::~RedisServerRunner() = default;
 
-bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
+hyper::StartResult hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
     if (running_) {
-        return false;
+        return {false,"the server is already running"};
     }
     auto& [listen_option , db_count,persistence_config] = config;
     if ((persistence_config.load_rdb_on_start || persistence_config.save_rdb_on_stop) &&
         !persistence_config.rdb_path.has_value()) {
-        return false;
+        return {false,"Rdb load on start or save on stop is enabled but RDB file path is missing"};
     }
     if (persistence_config.load_aof_on_start && !persistence_config.aof_path.has_value()) {
-        return false;
+        return {false,"AOF load on start is enabled but AOF file path is missing"};
     }
     std::unique_ptr<AofAppender> aof_appender{nullptr};
     std::unique_ptr<RdbSaver> rdb_saver{nullptr};
@@ -38,22 +38,25 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
     auto server = std::make_unique<RedisServer>(db_count, std::move(aof_appender), std::move(rdb_saver));
     if (persistence_config.load_aof_on_start) {
         if (!server->loadAof(ExpireClock::now())) {
-            return false;
+            return {false,"Failed to load AOF file during startup"};
         }
     } else if (persistence_config.load_rdb_on_start) {
         if (!server->loadRdb(ExpireClock::now())) {
-            return false;
+            return {false,"Failed to load RDB file during startup"};
         }
     }
-
-    listener_ = TcpListener::create(listen_option);
+    auto listener_res = TcpListener::create(listen_option);
+    if (std::holds_alternative<std::string>(listener_res)) {
+        return {false,std::get<std::string>(listener_res)};
+    }
+    listener_ = std::move(std::get<TcpListener>(listener_res));
     if (!listener_.has_value()) {
-        return false;
+        return {false,"unable to create listener"};
     }
 
     if (!server->attachListener(loop_, listener_->fd())) {
         listener_.reset();
-        return false;
+        return {false, "Failed to attach TCP listener to event loop"};
     }
 
     server_ = std::move(server);
@@ -71,12 +74,12 @@ bool hyper::RedisServerRunner::start(const RedisServerRunnerConfig& config) {
         server_->detachListener(loop_,listener_->fd());
         listener_.reset();
         server.reset();
-        return false;
+        return {false,"Failed to register serverCron time event"};
     }
 
     running_ = true;
 
-    return true;
+    return {true,""};
 }
 
 void hyper::RedisServerRunner::runOnce(std::chrono::milliseconds timeout) {

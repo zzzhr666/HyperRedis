@@ -361,7 +361,7 @@ dict / intset / ziplist / skipList / linked_list
 
 | 分类           | 命令                                                                                                                                                        |
 |--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX`、`SAVE`、`LASTSAVE`、`INFO`、`TIME`、`OBJECT`、`CONFIG` |
+| 连接 / DB / 通用 | `PING`、`SELECT`、`DBSIZE`、`DEL`、`EXISTS`、`TYPE`、`TTL`、`PTTL`、`PERSIST`、`EXPIRE`、`PEXPIRE`、`PEXPIREAT`、`FLUSHDB`、`FLUSHALL`、`RANDOMKEY`、`RENAME`、`RENAMENX`、`SAVE`、`LASTSAVE`、`INFO`、`TIME`、`OBJECT`、`CONFIG`、`COMMAND` |
 | String       | `SET`、`GET`、`MGET`、`MSET`、`STRLEN`、`APPEND`、`INCR`、`DECR`、`INCRBY`、`INCRBYFLOAT`、`GETRANGE`、`SETRANGE`                                                    |
 | List         | `LPUSH`、`RPUSH`、`LPOP`、`RPOP`、`LLEN`、`LRANGE`、`LINDEX`、`LSET`、`LINSERT`、`LREM`、`LTRIM`                                                                    |
 | Hash         | `HSET`、`HGET`、`HDEL`、`HLEN`、`HGETALL`、`HEXISTS`、`HKEYS`、`HVALS`                                                                                           |
@@ -439,7 +439,7 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - 暂未实现 AUTH、ACL、复制、Sentinel、Cluster。
 - 服务端目前是单线程事件循环，没有后台任务线程。
 - Ctrl-C/SIGTERM 已能触发 runner 停止和按配置保存 RDB，但还没有更完整的 server shutdown 状态机。
-- 启动失败时错误信息仍较粗，需要进一步携带 bind/listen errno。
+- 启动失败返回更具体 errno 信息已实现。
 
 ---
 
@@ -485,7 +485,7 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 - [x] 抽出 server 参数解析组件，支持监听和持久化参数
 - [x] Ctrl-C/SIGTERM 触发 `RedisServerRunner::stop()`
 - [x] `--help` 区分正常退出和参数错误
-- [ ] 启动失败返回更具体 errno 信息
+- [x] 启动失败返回更具体 errno 信息
 - [x] 设计 serverCron/time event，周期执行主动过期和 AOF everysec fsync
 
 ### 持久化演进
@@ -504,7 +504,7 @@ HyperRedis 现在已经可以通过 `redis-cli` 交互，但仍是学习版 serv
 
 - [x] 增加 `INFO` 等 redis-cli 友好命令的最小兼容实现
 - [x] 实现 `CONFIG` 管理命令，支持动态调整 `maxclients`、`timeout`、`appendfsync` 等
-- [ ] 增加 `COMMAND` 等更多 redis-cli 友好命令
+- [x] 增加 `COMMAND` 等更多 redis-cli 友好命令
 - [ ] 增加更多 Redis 行为兼容测试
 - [x] 增加 benchmark，量化命令执行、数据结构和网络层性能
 - [x] 完善最大客户端数（maxclients）和空闲连接自动断开（timeout）

@@ -35,8 +35,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     hyper::RedisServerRunner runner;
-    if (!runner.start(config)) {
-        SPDLOG_ERROR("Unable to start hyper redis runner.");
+    if (auto [success, error] = runner.start(config); !success) {
+        SPDLOG_ERROR("Unable to start hyper redis runner:{}", error);
         return 1;
     }
     SPDLOG_INFO("HyperRedis listening on {}:{}", config.listen_options.host, runner.port());

@@ -751,15 +751,16 @@ TEST(RedisServerTcpIntegrationTest, ProductionTcpListenerAcceptsClientAndProcess
 
     TcpListenOptions options;
     options.port = 0;
-    auto listener = TcpListener::create(options);
-    ASSERT_TRUE(listener.has_value());
+    auto listener_res = TcpListener::create(options);
+    ASSERT_TRUE(std::holds_alternative<TcpListener>(listener_res));
+    auto& listener = std::get<TcpListener>(listener_res);
 
     RedisServer server;
     EventLoop loop;
     const auto ping = serializeRespCommand(std::array<std::string_view, 1>{"PING"});
 
-    ASSERT_TRUE(server.attachListener(loop, listener->fd()));
-    TcpClient client(listener->port());
+    ASSERT_TRUE(server.attachListener(loop, listener.fd()));
+    TcpClient client(listener.port());
     ASSERT_TRUE(client.valid()) << client.errorStage() << " failed with errno " << client.errorNumber();
 
     ASSERT_EQ(runLoopUntilEvents(loop, 1), 1);
