@@ -77,6 +77,6 @@ void hyper::sendImmediateErrorAndClose(int fd, std::string_view message) {
     resp_err.append(message);
     resp_err.append("\r\n");
     //能写多少写多少，反正该fd注定是会被丢弃的
-    (void)::write(fd, resp_err.data(), resp_err.size());
+    std::ignore = ::write(fd, resp_err.data(), resp_err.size());
     ::close(fd);
 }
