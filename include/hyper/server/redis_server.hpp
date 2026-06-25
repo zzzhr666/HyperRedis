@@ -28,6 +28,10 @@ namespace hyper {
 
         RedisServer& operator=(const RedisServer&) = delete;
 
+        void setLoop(EventLoop* loop) {
+            current_loop_ = loop;
+        }
+
         RedisManager& manager() noexcept {
             return manager_;
         }
@@ -113,6 +117,15 @@ namespace hyper {
 
         std::size_t serverCron(EventLoop& loop, ExpireTimePoint now);
 
+        //sub pub
+        bool subscribe(ClientSession* client,const std::string& channel);
+
+        bool unsubscribe(ClientSession* client,const std::string& channel);
+
+        void unsubscribeAll(ClientSession* client);
+
+        int publish(const std::string& channel,const std::string& message);
+
     private:
         void enableClientWritable_(EventLoop& loop, int fd);
 
@@ -142,5 +155,8 @@ namespace hyper {
         std::chrono::seconds timeout_seconds_{0};
         pid_t rdb_child_pid_{-1};
         pid_t aof_child_pid_{-1};
+        EventLoop* current_loop_{nullptr};
+        std::unordered_map<std::string,std::unordered_set<ClientSession*>> sub_clients_;
+
     };
 }

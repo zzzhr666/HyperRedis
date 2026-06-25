@@ -17,6 +17,7 @@ HyperRedis 在设计上划分为 `HyperRedisCore` 静态核心库和 `hyper_redi
   - RDB-like 快照：支持全量数据二进制保存与加载，支持 checksum 校验。
   - AOF-like 日志：支持命令追加与重放、支持 `always`/`everysec`/`no` 刷盘策略，实现了当前上下文的 AOF 重写 (`REWRITEAOF`) 以及无阻塞的后台重写 (`BGREWRITEAOF`)，并带防数据丢失的 Rewrite Buffer。
 - **网络与服务端**：基于 epoll (poll 模拟) 的单线程文件事件循环 (`EventLoop`)，原生 TCP listener。完整实现 RESP2 协议解析与响应序列化，支持处理网络半包、连续命令。
+- **发布订阅 (Pub/Sub)**：完整实现了客户端频道订阅与消息实时广播 (`SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`)，支持高并发消息分发及断开连接时的安全内存回收。
 
 > **当前限制与规划**：暂不支持集群 (Cluster)、主从复制、哨兵 (Sentinel)。单线程事件循环本身无后台任务线程，但通过多进程 (`fork`) 实现了真正的无阻塞后台持久化 (`BGSAVE` / `BGREWRITEAOF`)。
 
@@ -34,6 +35,7 @@ HyperRedis 在设计上划分为 `HyperRedisCore` 静态核心库和 `hyper_redi
 | **Hash**     | `HSET`, `HGET`, `HDEL`, `HLEN`, `HGETALL`, `HEXISTS`, `HKEYS`, `HVALS`                                                                                           |
 | **Set**      | `SADD`, `SREM`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SPOP`, `SRANDMEMBER`                                                                                         |
 | **ZSet**     | `ZADD`, `ZREM`, `ZSCORE`, `ZCARD`, `ZRANGE`, `ZRANK`, `ZREVRANK`, `ZCOUNT`, `ZREVRANGE`, `ZINCRBY`, `ZREMRANGEBYRANK`, `ZREMRANGEBYSCORE`                            |
+| **Pub/Sub**  | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`                                                                                                                                 |
 
 ---
 

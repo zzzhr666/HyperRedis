@@ -60,6 +60,7 @@ hyper::StartResult hyper::RedisServerRunner::start(const RedisServerRunnerConfig
     }
 
     server_ = std::move(server);
+    server_->setLoop(&loop_);
     server_->setSaveRdbOnStop(persistence_config.save_rdb_on_stop);
 
     server_cron_event_id_ = loop_.addTimeEvent(

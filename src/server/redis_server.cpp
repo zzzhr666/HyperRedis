@@ -116,6 +116,58 @@ hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, Command
         return bgRewriteAof(now);
     }
 
+    if (res && res->command_name == CommandName::Publish && !std::holds_alternative<RespError>(execute_res)) {
+        return respInteger(publish(std::string(args[1]), std::string(args[2])));
+    }
+
+    if (res && res->command_name == CommandName::Subscribe && !std::holds_alternative<RespError>(execute_res)) {
+        for (int i = 1; i < args.size(); ++i) {
+            std::string channel(args[i]);
+            subscribe(client.session(), channel);
+
+
+            auto reply = std::make_shared<RespArray>();
+            reply->values.push_back(respBulk("subscribe"));
+            reply->values.push_back(respBulk(channel));
+            reply->values.push_back(respInteger(static_cast<std::int64_t>(client.pubsubChannels().size())));
+            if (i < args.size() - 1) {
+                client.session()->appendReply(reply);
+            } else {
+                return reply;
+            }
+        }
+    }
+    if (res && res->command_name == CommandName::Unsubscribe && !std::holds_alternative<RespError>(execute_res)) {
+        std::vector<std::string> channels;
+        if (args.size() == 1) {
+            channels = std::vector<std::string>(client.pubsubChannels().begin(), client.pubsubChannels().end());
+        } else {
+            channels = std::vector<std::string>(args.begin() + 1, args.end());
+        }
+
+        if (channels.empty()) {
+            auto reply = std::make_shared<RespArray>();
+            reply->values.push_back(respBulk("unsubscribe"));
+            reply->values.push_back(respNullBulk());
+            reply->values.push_back(respInteger(0));
+            return reply;
+        }
+
+        for (int i = 0; i < channels.size(); ++i) {
+            unsubscribe(client.session(), channels[i]);
+
+            auto reply = std::make_shared<RespArray>();
+            reply->values.push_back(respBulk("unsubscribe"));
+            reply->values.push_back(respBulk(channels[i]));
+            reply->values.push_back(respInteger(static_cast<std::int64_t>(client.pubsubChannels().size())));
+
+            if (i == channels.size() - 1) {
+                return reply;
+            } else {
+                client.session()->appendReply(reply);
+            }
+        }
+    }
     return execute_res;
 }
 
@@ -128,6 +180,7 @@ bool hyper::RedisServer::addClient(int fd) {
 
 bool hyper::RedisServer::removeClient(int fd) {
     if (auto it = client_sessions_.find(fd); it != client_sessions_.end()) {
+        unsubscribeAll(&it->second);
         client_sessions_.erase(it);
         return true;
     }
@@ -323,6 +376,59 @@ std::size_t hyper::RedisServer::serverCron(EventLoop& loop, ExpireTimePoint now)
         aof_appender_->flushIfNeeded(now);
     }
     return done;
+}
+
+bool hyper::RedisServer::subscribe(ClientSession* client, const std::string& channel) {
+    if (client->context().addPubSubChannel(channel)) {
+        sub_clients_[channel].insert(client);
+        return true;
+    }
+    return false;
+}
+
+bool hyper::RedisServer::unsubscribe(ClientSession* client, const std::string& channel) {
+    if (client->context().removePubSubChannel(channel)) {
+        if (auto it = sub_clients_.find(channel); it != sub_clients_.end()) {
+            it->second.erase(client);
+            if (it->second.empty()) {
+                sub_clients_.erase(it);
+            }
+        }
+
+        return true;
+    }
+    return false;
+}
+
+void hyper::RedisServer::unsubscribeAll(ClientSession* client) {
+    auto& sub_channels = client->context().pubsubChannels();
+    for (auto& channel : sub_channels) {
+        sub_clients_[channel].erase(client);
+        if (sub_clients_[channel].empty()) {
+            sub_clients_.erase(channel);
+        }
+    }
+    client->context().clearChannels();
+}
+
+int hyper::RedisServer::publish(const std::string& channel, const std::string& message) {
+    auto it = sub_clients_.find(channel);
+    if (it == sub_clients_.end() || it->second.empty()) {
+        return 0;
+    }
+    auto reply = std::make_shared<RespArray>();
+    reply->values.push_back(respBulk("message"));
+    reply->values.push_back(respBulk(channel));
+    reply->values.push_back(respBulk(message));
+
+    for (auto* client : it->second) {
+        client->appendReply(reply);
+        if (current_loop_) {
+            enableClientWritable_(*current_loop_, client->fd());
+        }
+    }
+
+    return static_cast<int>(it->second.size());
 }
 
 void hyper::RedisServer::enableClientWritable_(EventLoop& loop, int fd) {

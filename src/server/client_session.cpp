@@ -9,10 +9,16 @@
 #include "hyper/server/resp_value.hpp"
 
 hyper::ClientSession::ClientSession(int fd)
-    : fd_(fd), close_after_reply_(false), last_interaction_time_(ExpireClock::now()) {}
+    : fd_(fd), close_after_reply_(false), last_interaction_time_(ExpireClock::now()) {
+    context_.setSession(this);
+}
 
 void hyper::ClientSession::appendQueryBytes(std::string_view bytes) {
     query_buffer_.append(bytes);
+}
+
+void hyper::ClientSession::appendReply(const RespValue& reply) {
+    reply_buffer_.append(serializeRespValue(reply));
 }
 
 std::string hyper::ClientSession::takeReplyBytes() {

@@ -6,7 +6,7 @@
 
 namespace {
     constexpr auto makeRegistry() {
-        constexpr std::size_t CommandNumber = 78;
+        constexpr std::size_t CommandNumber = 81;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -87,7 +87,10 @@ namespace {
                 {"REWRITEAOF", 1, 1, hyper::CommandName::RewriteAof, false},
                 {"BGREWRITEAOF", 1, 1, hyper::CommandName::BgRewriteAof, false},
                 {"COMMAND",1,hyper::UnlimitedArity,hyper::CommandName::Command,false},
-                {"HRZHANG",1,1,hyper::CommandName::Ping,false}
+                {"HRZHANG",1,1,hyper::CommandName::Ping,false},
+                {"PUBLISH", 3, 3, hyper::CommandName::Publish, false},
+                {"SUBSCRIBE", 2, hyper::UnlimitedArity, hyper::CommandName::Subscribe, false},
+                {"UNSUBSCRIBE", 1, hyper::UnlimitedArity, hyper::CommandName::Unsubscribe, false}
 
             }
         };

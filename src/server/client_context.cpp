@@ -18,3 +18,11 @@ hyper::RedisDb* hyper::RedisClientContext::currentDb(RedisManager& manager) cons
 const hyper::RedisDb* hyper::RedisClientContext::currentDb(const RedisManager& manager) const noexcept {
     return manager.db(db_index_);
 }
+
+bool hyper::RedisClientContext::addPubSubChannel(const std::string& channel) {
+    return sub_channels_.insert(channel).second;
+}
+
+bool hyper::RedisClientContext::removePubSubChannel(const std::string& channel) {
+    return sub_channels_.erase(channel) > 0;
+}

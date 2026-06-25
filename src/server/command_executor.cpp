@@ -266,6 +266,9 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
     case CommandName::Config:
     case CommandName::RewriteAof:
     case CommandName::BgRewriteAof:
+    case CommandName::Publish:
+    case CommandName::Subscribe:
+    case CommandName::Unsubscribe:
         return respOk();
     case CommandName::Object:
         return object_(manager, client, args, now);

@@ -119,6 +119,7 @@ set(HYPERREDIS_TESTS
         redis_server_runner_test
         redis_server_test
         server_options_test
+        pubsub_state_test
 )
 
 foreach (test_target IN LISTS HYPERREDIS_TESTS)

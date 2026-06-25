@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 
+#include "resp_value.hpp"
 #include "hyper/time.hpp"
 #include "hyper/server/client_context.hpp"
 
@@ -39,6 +40,8 @@ namespace hyper {
         }
 
         void appendQueryBytes(std::string_view bytes);
+
+        void appendReply(const RespValue& reply);
 
         [[nodiscard]] std::string takeReplyBytes();
 
