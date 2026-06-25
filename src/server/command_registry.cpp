@@ -6,8 +6,7 @@
 
 namespace {
     constexpr auto makeRegistry() {
-
-        constexpr std::size_t CommandNumber = 76;
+        constexpr std::size_t CommandNumber = 78;
 
         std::array<hyper::CommandSpec, CommandNumber> registry{
             {
@@ -80,11 +79,13 @@ namespace {
                 {"ZREVRANGE", 4, 5, hyper::CommandName::ZRevRange, false},
                 {"ZREVRANK", 3, 3, hyper::CommandName::ZRevRank, false},
                 {"SAVE", 1, 1, hyper::CommandName::Save, false},
+                {"BGSAVE", 1, 1, hyper::CommandName::BgSave, false},
                 {"LASTSAVE", 1, 1, hyper::CommandName::LastSave, false},
                 {"INFO", 1, 2, hyper::CommandName::Info, false},
                 {"OBJECT", 3, 3, hyper::CommandName::Object, false},
                 {"TIME", 1, 1, hyper::CommandName::Time, false},
                 {"REWRITEAOF", 1, 1, hyper::CommandName::RewriteAof, false},
+                {"BGREWRITEAOF", 1, 1, hyper::CommandName::BgRewriteAof, false},
                 {"COMMAND",1,hyper::UnlimitedArity,hyper::CommandName::Command,false},
                 {"HRZHANG",1,1,hyper::CommandName::Ping,false}
 

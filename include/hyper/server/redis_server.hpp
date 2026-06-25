@@ -4,6 +4,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <sys/types.h>
 
 #include "client_session.hpp"
 #include "command_processor.hpp"
@@ -16,7 +17,6 @@ namespace hyper {
 
     class RedisServer {
     public:
-
         RedisServer(std::size_t db_count, std::unique_ptr<AofAppender> aof_appender,
                     std::unique_ptr<RdbSaver> rdb_saver);
 
@@ -65,13 +65,22 @@ namespace hyper {
         [[nodiscard]] bool hasRdbSaver() const noexcept {
             return rdb_saver_ != nullptr;
         }
+
         [[nodiscard]] bool loadRdb(ExpireTimePoint now);
         [[nodiscard]] bool saveRdb(ExpireTimePoint now);
+        [[nodiscard]] RespValue bgSave(ExpireTimePoint now);
+        [[nodiscard]] RespValue bgRewriteAof(ExpireTimePoint now);
+
+        [[nodiscard]] bool hasActiveChildProcess() const noexcept {
+            return rdb_child_pid_ != -1 || aof_child_pid_ != -1;
+        }
+
 
         //AOF
         [[nodiscard]] bool hasAofAppender() const noexcept {
             return aof_appender_ != nullptr;
         }
+
         [[nodiscard]] bool loadAof(ExpireTimePoint now);
 
         [[nodiscard]] ExpireTimePoint lastSaveTime() const noexcept {
@@ -115,6 +124,8 @@ namespace hyper {
 
         RespValue rewriteAof_(ExpireTimePoint now);
 
+        void checkChildrenDone();
+
     private:
         RedisManager manager_;
         std::unique_ptr<AofAppender> aof_appender_;
@@ -129,5 +140,7 @@ namespace hyper {
         std::size_t max_clients_;
         ExpireTimePoint start_time_;
         std::chrono::seconds timeout_seconds_{0};
-        };
-        }
+        pid_t rdb_child_pid_{-1};
+        pid_t aof_child_pid_{-1};
+    };
+}

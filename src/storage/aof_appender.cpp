@@ -35,12 +35,22 @@ std::string hyper::policyToString(AofFsyncPolicy policy) {
 
 hyper::AofAppender::AofAppender(std::filesystem::path path, AofFsyncPolicy policy)
     : path_(std::move(path)), selected_db_index_(0), broken_(false),
-      fsync_policy_(policy), fsync_pending_(false), fd_(-1) {}
+      fsync_policy_(policy), fsync_pending_(false), fd_(-1), rewrite_in_progress_(false) {}
 
 hyper::AofAppender::~AofAppender() {
     if (fd_ != -1) {
         ::close(fd_);
     }
+}
+
+void hyper::AofAppender::startRewrite() noexcept {
+    rewrite_in_progress_ = true;
+    rewrite_buffer_.clear();
+}
+
+std::string hyper::AofAppender::stopRewrite() noexcept {
+    rewrite_in_progress_ = false;
+    return std::move(rewrite_buffer_);
 }
 
 bool hyper::AofAppender::appendCommand(std::size_t db_index, std::span<const std::string_view> args,
@@ -109,7 +119,7 @@ bool hyper::AofAppender::syncIfDue_(ExpireTimePoint now) {
         last_fsync_time_ = now;
         return true;
     }
-    if ( now - last_fsync_time_.value() < std::chrono::seconds(1)) {
+    if (now - last_fsync_time_.value() < std::chrono::seconds(1)) {
         return true;
     }
     int ret = ::fsync(fd_);
@@ -129,6 +139,9 @@ bool hyper::AofAppender::appendBytes_(std::string_view bytes) {
             return false;
         }
     }
+    if (rewrite_in_progress_) {
+        rewrite_buffer_.append(bytes);
+    }
 
     ssize_t count{0};
     while (count < static_cast<ssize_t>(bytes.size())) {
@@ -146,6 +159,7 @@ bool hyper::AofAppender::appendBytes_(std::string_view bytes) {
     }
     return true;
 }
+
 void hyper::AofAppender::closeFd_() {
     if (fd_ != -1) {
         ::close(fd_);

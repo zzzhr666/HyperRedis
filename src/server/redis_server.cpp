@@ -2,10 +2,12 @@
 
 #include <cerrno>
 #include <fcntl.h>
+#include <fstream>
 #include <unistd.h>
 #include <utility>
 #include <spdlog/spdlog.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 
 #include "hyper/server/client_socket_io.hpp"
 #include "hyper/server/command_registry.hpp"
@@ -37,7 +39,8 @@ hyper::RedisServer::RedisServer(std::size_t db_count, std::unique_ptr<AofAppende
                                 std::unique_ptr<RdbSaver> rdb_saver)
     : manager_(db_count), aof_appender_(std::move(aof_appender)), rdb_saver_(std::move(rdb_saver)),
       processor_(aof_appender_.get()), last_save_time_(ExpireClock::now()), save_rdb_on_stop_(false),
-      dirty_count_(0), total_commands_(0), max_clients_(DefaultMaxClients), start_time_(ExpireClock::now()) {}
+      dirty_count_(0), total_commands_(0), max_clients_(DefaultMaxClients), start_time_(ExpireClock::now()),
+      rdb_child_pid_(-1) {}
 
 hyper::RedisServer::RedisServer(std::size_t db_count)
     : RedisServer(db_count, nullptr, nullptr) {}
@@ -87,6 +90,10 @@ hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, Command
         last_save_time_ = now;
     }
 
+    if (res && res->command_name == CommandName::BgSave && !std::holds_alternative<RespError>(execute_res)) {
+        return bgSave(now);
+    }
+
     if (res && res->command_name == CommandName::LastSave && !std::holds_alternative<RespError>(execute_res)) {
         auto seconds = std::chrono::duration_cast<std::chrono::seconds>(last_save_time_.time_since_epoch());
         return respInteger(seconds.count());
@@ -103,6 +110,10 @@ hyper::RespValue hyper::RedisServer::execute(RedisClientContext& client, Command
 
     if (res && res->command_name == CommandName::RewriteAof && !std::holds_alternative<RespError>(execute_res)) {
         return rewriteAof_(now);
+    }
+
+    if (res && res->command_name == CommandName::BgRewriteAof && !std::holds_alternative<RespError>(execute_res)) {
+        return bgRewriteAof(now);
     }
 
     return execute_res;
@@ -213,11 +224,69 @@ bool hyper::RedisServer::loadRdb(ExpireTimePoint now) {
 }
 
 bool hyper::RedisServer::saveRdb(ExpireTimePoint now) {
+    if (hasActiveChildProcess()) {
+        return false;
+    }
     if (hasRdbSaver()) {
         SPDLOG_INFO("Saving RDB to {}", rdb_saver_->path().string());
         return rdb_saver_->save(manager_, now);
     }
     return false;
+}
+
+hyper::RespValue hyper::RedisServer::bgSave(ExpireTimePoint now) {
+    if (!hasRdbSaver()) {
+        return respError("ERR save is not configured");
+    }
+    if (hasActiveChildProcess()) {
+        return respError("ERR background save already in progress");
+    }
+    SPDLOG_INFO("Starting BGSAVE");
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        //child progress
+        bool success = rdb_saver_->save(manager_, now);
+        std::_Exit(success ? 0 : 1);
+    }
+    if (pid == -1) {
+        //fork() failed
+        SPDLOG_ERROR("BGSAVE fork failed");
+        return respError("ERR can't bgsave: fork failed");
+    }
+
+    //parent progress
+    rdb_child_pid_ = pid;
+    return respBulk("background saving started");
+}
+
+hyper::RespValue hyper::RedisServer::bgRewriteAof(ExpireTimePoint now) {
+    if (!hasAofAppender()) {
+        return respError("ERR aof is not enabled");
+    }
+    if (hasActiveChildProcess()) {
+        return respError("ERR background append only file rewriting already in progress");
+    }
+    SPDLOG_INFO("Starting BGREWRITEAOF");
+    aof_appender_->startRewrite();
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        // child process
+        auto target_path = aof_appender_->path();
+        std::filesystem::path tmp_path(target_path.string() + ".bg-rewrite.tmp");
+        bool success = AofRewriter::rewrite(tmp_path, manager_, now);
+        std::_Exit(success ? 0 : 1);
+    }
+
+    if (pid == -1) {
+        //fork failed
+        SPDLOG_ERROR("BGREWRITEAOF fork failed");
+        (void)aof_appender_->stopRewrite();
+        return respError("ERR can't bgrewriteaof: fork failed");
+    }
+
+    // parent process
+    aof_child_pid_ = pid;
+    return respBulk("background append only file rewriting started");
 }
 
 bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
@@ -237,7 +306,7 @@ bool hyper::RedisServer::loadAof(ExpireTimePoint now) {
 
 std::size_t hyper::RedisServer::serverCron(EventLoop& loop, ExpireTimePoint now) {
     std::size_t done = activeExpireCycle(now, CheckKeysNumber);
-
+    checkChildrenDone();
     if (timeout_seconds_.count() > 0) {
         std::vector<int> fds;
         for (const auto& [fd,session] : client_sessions_) {
@@ -496,4 +565,47 @@ hyper::RespValue hyper::RedisServer::rewriteAof_(ExpireTimePoint now) {
     aof_appender_->reload();
     SPDLOG_INFO("AOF Rewrite: completed successfully");
     return respOk();
+}
+
+void hyper::RedisServer::checkChildrenDone() {
+    if (!hasActiveChildProcess()) {
+        return;
+    }
+    int stat_loc;
+    pid_t pid = waitpid(-1, &stat_loc,WNOHANG);
+
+    if (pid == rdb_child_pid_) {
+        rdb_child_pid_ = -1;
+        int exit_code = WEXITSTATUS(stat_loc);
+        if (exit_code == 0) {
+            SPDLOG_INFO("background saveing terminated with success");
+            last_save_time_ = ExpireClock::now();
+        } else {
+            SPDLOG_ERROR("back ground saving terminated with error code {}", exit_code);
+        }
+    } else if (pid == aof_child_pid_) {
+        aof_child_pid_ = -1;
+        int exit_code = WEXITSTATUS(stat_loc);
+        if (exit_code == 0) {
+            SPDLOG_INFO("Background AOF rewrite terminated with success");
+            std::string diff = aof_appender_->stopRewrite();
+            auto target_path = aof_appender_->path();
+            std::filesystem::path tmp_path(target_path.string() + ".bg-rewrite.tmp");
+            std::ofstream out(tmp_path, std::ios::binary | std::ios::app);
+            if (out) {
+                out.write(diff.data(), static_cast<std::streamsize>(diff.size()));
+                out.close();
+            }
+            std::error_code ec;
+            std::filesystem::rename(tmp_path, target_path, ec);
+            if (!ec) {
+                aof_appender_->reload();
+                SPDLOG_INFO("background AOF rewrite successful and swapped");
+            } else {
+                SPDLOG_ERROR("failed to rename new AOF file:{}", ec.message());
+            }
+        } else {
+            SPDLOG_ERROR("Background AOF rewrite terminated with error code {}", exit_code);
+        }
+    }
 }

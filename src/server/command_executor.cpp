@@ -260,10 +260,12 @@ hyper::RespValue hyper::CommandExecutor::execute(RedisManager& manager, RedisCli
     case CommandName::ZRemRangeByScore:
         return zRemRangeByScore_(manager, client, args, now);
     case CommandName::Save:
+    case CommandName::BgSave:
     case CommandName::LastSave:
     case CommandName::Info:
     case CommandName::Config:
     case CommandName::RewriteAof:
+    case CommandName::BgRewriteAof:
         return respOk();
     case CommandName::Object:
         return object_(manager, client, args, now);

@@ -75,12 +75,14 @@ namespace hyper {
         ZRemRangeByRank,
         ZRemRangeByScore,
         Save,
+        BgSave,
         LastSave,
         Info,
         Object,
         Time,
         Config,
         RewriteAof,
+        BgRewriteAof,
         Command
     };
 

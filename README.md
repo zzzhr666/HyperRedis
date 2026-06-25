@@ -15,10 +15,10 @@ HyperRedis 在设计上划分为 `HyperRedisCore` 静态核心库和 `hyper_redi
 - **数据库与过期机制**：支持多 DB (`SELECT`)、键空间主字典、独立过期字典。支持主动与惰性过期，支持 `TTL`、`EXPIRE` 等时间语义。
 - **持久化 (AOF & RDB)**：
   - RDB-like 快照：支持全量数据二进制保存与加载，支持 checksum 校验。
-  - AOF-like 日志：支持命令追加与重放、支持 `always`/`everysec`/`no` 刷盘策略，实现了当前上下文的 AOF 重写 (`REWRITEAOF`)。
+  - AOF-like 日志：支持命令追加与重放、支持 `always`/`everysec`/`no` 刷盘策略，实现了当前上下文的 AOF 重写 (`REWRITEAOF`) 以及无阻塞的后台重写 (`BGREWRITEAOF`)，并带防数据丢失的 Rewrite Buffer。
 - **网络与服务端**：基于 epoll (poll 模拟) 的单线程文件事件循环 (`EventLoop`)，原生 TCP listener。完整实现 RESP2 协议解析与响应序列化，支持处理网络半包、连续命令。
 
-> **当前限制与规划**：暂不支持集群 (Cluster)、主从复制、哨兵 (Sentinel)。单线程事件循环无后台任务线程，后台持久化 (BGSAVE / BGREWRITEAOF) 正在规划中。
+> **当前限制与规划**：暂不支持集群 (Cluster)、主从复制、哨兵 (Sentinel)。单线程事件循环本身无后台任务线程，但通过多进程 (`fork`) 实现了真正的无阻塞后台持久化 (`BGSAVE` / `BGREWRITEAOF`)。
 
 ---
 
@@ -28,7 +28,7 @@ HyperRedis 在设计上划分为 `HyperRedisCore` 静态核心库和 `hyper_redi
 
 | 分类           | 涵盖命令                                                                                                                                                        |
 |--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **连接/DB/通用** | `PING`, `SELECT`, `DBSIZE`, `DEL`, `EXISTS`, `TYPE`, `TTL`, `PTTL`, `PERSIST`, `EXPIRE`, `PEXPIRE`, `PEXPIREAT`, `FLUSHDB`, `FLUSHALL`, `RANDOMKEY`, `RENAME`, `RENAMENX`, `SAVE`, `LASTSAVE`, `INFO`, `TIME`, `OBJECT`, `CONFIG`, `COMMAND` |
+| **连接/DB/通用** | `PING`, `SELECT`, `DBSIZE`, `DEL`, `EXISTS`, `TYPE`, `TTL`, `PTTL`, `PERSIST`, `EXPIRE`, `PEXPIRE`, `PEXPIREAT`, `FLUSHDB`, `FLUSHALL`, `RANDOMKEY`, `RENAME`, `RENAMENX`, `SAVE`, `BGSAVE`, `LASTSAVE`, `INFO`, `TIME`, `OBJECT`, `CONFIG`, `COMMAND`, `REWRITEAOF`, `BGREWRITEAOF` |
 | **String**   | `SET`, `GET`, `MGET`, `MSET`, `STRLEN`, `APPEND`, `INCR`, `DECR`, `INCRBY`, `INCRBYFLOAT`, `GETRANGE`, `SETRANGE`                                                    |
 | **List**     | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`, `LINDEX`, `LSET`, `LINSERT`, `LREM`, `LTRIM`                                                                    |
 | **Hash**     | `HSET`, `HGET`, `HDEL`, `HLEN`, `HGETALL`, `HEXISTS`, `HKEYS`, `HVALS`                                                                                           |

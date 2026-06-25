@@ -37,6 +37,10 @@ namespace hyper {
             return broken_;
         }
 
+        void startRewrite() noexcept;
+
+        [[nodiscard]] std::string stopRewrite() noexcept;
+
         [[nodiscard]] bool appendCommand(std::size_t db_index,
                                          std::span<const std::string_view> args,
                                          ExpireTimePoint now);
@@ -66,6 +70,7 @@ namespace hyper {
 
         void closeFd_();
 
+    private:
         std::filesystem::path path_;
         std::size_t selected_db_index_;
         bool broken_;
@@ -73,5 +78,7 @@ namespace hyper {
         bool fsync_pending_;
         int fd_;
         std::optional<ExpireTimePoint> last_fsync_time_;
+        bool rewrite_in_progress_;
+        std::string rewrite_buffer_;
     };
 }
